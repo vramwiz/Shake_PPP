@@ -20,6 +20,7 @@ uses
   Shake_PPP_DebugLog,
   Shake_PPP_FilterSettings,
   Shake_PPP_LastFrameCapture,
+  Shake_PPP_RuntimeDeformer,
   Shake_PPP_SettingsForm;
 
 const
@@ -34,11 +35,19 @@ var
   );
 
 function EmptyProcVideo(Video: PFILTER_PROC_VIDEO): Byte; cdecl;
+var
+  CurveDataText: string;
 begin
   try
     CaptureLastFrame(Video);
+    CurveDataText := '';
+    if Assigned(CurveDataItem.Value) then
+      CurveDataText := string(CurveDataItem.Value);
+    ApplyRuntimeDeformation(Video, CurveDataText,
+      CurrentShakeRuntimeSettings);
   except
-    // AviUtl2の映像コールバック境界へDelphi例外を漏らさない。
+    on E: Exception do
+      DebugLog('Video callback failed: ' + E.ClassName + ': ' + E.Message);
   end;
   Result := 1;
 end;
@@ -123,7 +132,7 @@ var
     Name: '設定';
     Callback: SettingsButtonCallback
   );
-  PluginItems: array[0..10] of Pointer;
+  PluginItems: array[0..12] of Pointer;
   Plugin: TFILTER_PLUGIN_TABLE = (
     Flag: FILTER_FLAG_VIDEO or FILTER_FLAG_FILTER;
     Name: '胸揺れ';
@@ -139,12 +148,14 @@ begin
   ResetDebugLog;
   DebugLog(Format('InitializePlugin version=%d.', [Version]));
   InitializeLastFrameCapture;
+  InitializeRuntimeDeformer;
   Result := 1;
 end;
 
 procedure FinalizeShakePlugin;
 begin
   DebugLog('UninitializePlugin started.');
+  FinalizeRuntimeDeformer;
   FinalizeLastFrameCapture;
 end;
 
@@ -154,15 +165,17 @@ begin
   begin
     PluginItems[0] := @SettingsButton;
     PluginItems[1] := @TimeAxisEnabledItem;
-    PluginItems[2] := @StrengthItem;
-    PluginItems[3] := @DelayItem;
-    PluginItems[4] := @SoftnessItem;
-    PluginItems[5] := @DurationItem;
-    PluginItems[6] := @MaximumDeformationItem;
-    PluginItems[7] := @HorizontalInfluenceItem;
-    PluginItems[8] := @VerticalInfluenceItem;
-    PluginItems[9] := @CurveDataItem;
-    PluginItems[10] := nil;
+    PluginItems[2] := @PositionXItem;
+    PluginItems[3] := @PositionYItem;
+    PluginItems[4] := @StrengthItem;
+    PluginItems[5] := @DelayItem;
+    PluginItems[6] := @SoftnessItem;
+    PluginItems[7] := @DurationItem;
+    PluginItems[8] := @MaximumDeformationItem;
+    PluginItems[9] := @HorizontalInfluenceItem;
+    PluginItems[10] := @VerticalInfluenceItem;
+    PluginItems[11] := @CurveDataItem;
+    PluginItems[12] := nil;
     Plugin.Items := @PluginItems[0];
   end;
   Result := @Plugin;

@@ -13,7 +13,7 @@ video.scale=1
 audio.rate=44100
 output.width=1920
 output.height=1080
-cursor.frame=84
+cursor.frame=46
 cursor.layer=2
 preview.frame=0
 display.frame=0
@@ -34,7 +34,7 @@ display.tempo.offset=0.000000
 [0]
 layer=1
 focus=1
-frame=30,110
+frame=30,84,156,209
 [0.0]
 effect.name=画像ファイル
 ファイル=D:\DelphiProg\test\Shake_PPP\Image\sample.png
@@ -63,6 +63,8 @@ Group2=1
 effect.name=胸揺れ
 設定=
 時間軸計算=1
+移動X=0.0,100.0,0.0,-100.0,直線移動,0
+移動Y=0.0
 揺れの強さ=100
 動きの遅れ=50
 やわらかさ=50

@@ -10,6 +10,8 @@ uses
 type
   TShakeRuntimeSettings = record
     TimeAxisEnabled: Boolean;
+    PositionX: Double;
+    PositionY: Double;
     Strength: Double;
     Delay: Double;
     Softness: Double;
@@ -24,6 +26,22 @@ var
     ItemType: 'check';
     Name: '時間軸計算';
     Value: 1
+  );
+  PositionXItem: TFILTER_ITEM_TRACK = (
+    ItemType: 'track';
+    Name: '移動X';
+    Value: 0.0;
+    S: -10000.0;
+    E: 10000.0;
+    Step: 0.1
+  );
+  PositionYItem: TFILTER_ITEM_TRACK = (
+    ItemType: 'track';
+    Name: '移動Y';
+    Value: 0.0;
+    S: -10000.0;
+    E: 10000.0;
+    Step: 0.1
   );
   StrengthItem: TFILTER_ITEM_TRACK = (
     ItemType: 'track';
@@ -97,6 +115,8 @@ end;
 function CurrentShakeRuntimeSettings: TShakeRuntimeSettings;
 begin
   Result.TimeAxisEnabled := TimeAxisEnabledItem.Value <> 0;
+  Result.PositionX := PositionXItem.Value;
+  Result.PositionY := PositionYItem.Value;
   Result.Strength := Percent(StrengthItem.Value, 0, 200);
   Result.Delay := Percent(DelayItem.Value, 0, 100);
   Result.Softness := Percent(SoftnessItem.Value, 0, 100);

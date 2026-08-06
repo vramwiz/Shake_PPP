@@ -11,6 +11,7 @@ uses
   Shake_PPP_FilterSettings in 'Source\Common\Settings\Shake_PPP_FilterSettings.pas',
   Shake_PPP_CurveRenderer in 'Source\Common\Render\Shake_PPP_CurveRenderer.pas',
   Shake_PPP_StaticDeformer in 'Source\Common\Render\Shake_PPP_StaticDeformer.pas',
+  Shake_PPP_RuntimeDeformer in 'Source\Common\Render\Shake_PPP_RuntimeDeformer.pas',
   Shake_PPP_DebugLog in 'Source\Common\Diagnostics\Shake_PPP_DebugLog.pas',
   Shake_PPP_LastFrameCapture in 'Source\Common\Render\Shake_PPP_LastFrameCapture.pas',
   Shake_PPP_SettingsForm in 'Source\Plugin\Filter\Shake_PPP_SettingsForm.pas' {FormShakeSettings},

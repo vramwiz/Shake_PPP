@@ -20,6 +20,9 @@ type
     function Apply(Source, Destination: TBitmap;
       DisplacementX, DisplacementY: Double;
       out ErrorText: string): Boolean;
+    function ApplyRgba(Source, Destination: Pointer;
+      DisplacementX, DisplacementY: Double;
+      out ErrorText: string): Boolean;
     property Height: Integer read FHeight;
     property Width: Integer read FWidth;
   end;
@@ -395,6 +398,74 @@ begin
        FLastTimingLog - StartedAt]));
   end;
 {$ENDIF}
+  Result := True;
+end;
+
+function TShakeDeformationMap.ApplyRgba(Source, Destination: Pointer;
+  DisplacementX, DisplacementY: Double;
+  out ErrorText: string): Boolean;
+type
+  PRgbaBytes = ^TRgbaBytes;
+  TRgbaBytes = array[0..268435455] of Byte;
+var
+  Channel: Integer;
+  FX: Double;
+  FY: Double;
+  PixelOffset00: NativeInt;
+  PixelOffset01: NativeInt;
+  PixelOffset10: NativeInt;
+  PixelOffset11: NativeInt;
+  SourceBytes: PRgbaBytes;
+  DestinationBytes: PRgbaBytes;
+  SourceX: Double;
+  SourceY: Double;
+  Value: Double;
+  Weight: Double;
+  X: Integer;
+  X0: Integer;
+  X1: Integer;
+  Y: Integer;
+  Y0: Integer;
+  Y1: Integer;
+begin
+  Result := False;
+  ErrorText := '';
+  if (Source = nil) or (Destination = nil) or (FWidth <= 0) or
+    (FHeight <= 0) or (Length(FWeights) <> FWidth * FHeight) then
+  begin
+    ErrorText := 'MAP_NOT_READY';
+    Exit;
+  end;
+  SourceBytes := Source;
+  DestinationBytes := Destination;
+  for Y := 0 to FHeight - 1 do
+    for X := 0 to FWidth - 1 do
+    begin
+      Weight := FWeights[Y * FWidth + X];
+      SourceX := EnsureRange(X - DisplacementX * Weight,
+        0.0, FWidth - 1.0);
+      SourceY := EnsureRange(Y - DisplacementY * Weight,
+        0.0, FHeight - 1.0);
+      X0 := Trunc(SourceX);
+      Y0 := Trunc(SourceY);
+      X1 := Min(X0 + 1, FWidth - 1);
+      Y1 := Min(Y0 + 1, FHeight - 1);
+      FX := SourceX - X0;
+      FY := SourceY - Y0;
+      PixelOffset00 := (NativeInt(Y0) * FWidth + X0) * 4;
+      PixelOffset01 := (NativeInt(Y0) * FWidth + X1) * 4;
+      PixelOffset10 := (NativeInt(Y1) * FWidth + X0) * 4;
+      PixelOffset11 := (NativeInt(Y1) * FWidth + X1) * 4;
+      for Channel := 0 to 3 do
+      begin
+        Value := (SourceBytes^[PixelOffset00 + Channel] * (1 - FX) +
+          SourceBytes^[PixelOffset01 + Channel] * FX) * (1 - FY) +
+          (SourceBytes^[PixelOffset10 + Channel] * (1 - FX) +
+          SourceBytes^[PixelOffset11 + Channel] * FX) * FY;
+        DestinationBytes^[(NativeInt(Y) * FWidth + X) * 4 + Channel] :=
+          EnsureRange(Round(Value), 0, 255);
+      end;
+    end;
   Result := True;
 end;
 
