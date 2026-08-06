@@ -3,7 +3,7 @@
         <ProjectGuid>{0D4E3867-6594-4D91-9AC8-D2B32FE091FB}</ProjectGuid>
         <ProjectVersion>20.4</ProjectVersion>
         <FrameworkType>None</FrameworkType>
-        <Config Condition="'$(Config)'==''">Debug</Config>
+        <Config Condition="'$(Config)'==''">Release</Config>
         <Platform Condition="'$(Platform)'==''">Win64</Platform>
         <ProjectName Condition="'$(ProjectName)'==''">Shake_PPP</ProjectName>
         <TargetedPlatforms>2</TargetedPlatforms>
@@ -71,7 +71,7 @@
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PostBuildEvent><![CDATA[copy /Y "C:\ProgramData\aviutl2\Plugin\Shake_PPP\$(PROJECTNAME).dll" "C:\ProgramData\aviutl2\Plugin\Shake_PPP\$(PROJECTNAME).auf2"]]></PostBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
-        <Debugger_HostApplication>D:\aviutl2_v2.1.0\aviutl2.exe</Debugger_HostApplication>
+        <Debugger_HostApplication>D:\aviutl2_v2.1.3a\aviutl2.exe</Debugger_HostApplication>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2)'!=''">
         <BT_BuildType>Release</BT_BuildType>
@@ -101,6 +101,7 @@
         <DCCReference Include="Source\Common\Settings\Shake_PPP_FilterSettings.pas"/>
         <DCCReference Include="Source\Common\Render\Shake_PPP_CurveRenderer.pas"/>
         <DCCReference Include="Source\Common\Render\Shake_PPP_StaticDeformer.pas"/>
+        <DCCReference Include="Source\Common\Render\Shake_PPP_RuntimeDeformer.pas"/>
         <DCCReference Include="Source\Common\Diagnostics\Shake_PPP_DebugLog.pas"/>
         <DCCReference Include="Source\Common\Render\Shake_PPP_LastFrameCapture.pas"/>
         <DCCReference Include="Source\Plugin\Filter\Shake_PPP_SettingsForm.pas">

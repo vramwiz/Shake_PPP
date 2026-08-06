@@ -224,6 +224,47 @@ begin
     Mask[Y1 * GridWidth + X1] * FX) * FY;
 end;
 
+{$IFDEF DEBUG}
+procedure DebugLogCurveCoordinates(const CurveName: string;
+  Curve: TShakeCurve; const Polygon: TArray<TPointF>;
+  Width, Height: Integer);
+var
+  I: Integer;
+  MaximumX: Double;
+  MaximumY: Double;
+  MinimumX: Double;
+  MinimumY: Double;
+  Vertex: TShakeCurveVertex;
+begin
+  for I := 0 to Curve.Count - 1 do
+  begin
+    Vertex := Curve[I];
+    Shake_PPP_DebugLog.DebugLog(Format(
+      'Deformation curve vertex: curve=%s index=%d normalized=(%.8f,%.8f) image=(%.3f,%.3f).',
+      [CurveName, I, Vertex.Position.X, Vertex.Position.Y,
+       Vertex.Position.X * Max(1, Width - 1),
+       Vertex.Position.Y * Max(1, Height - 1)]));
+  end;
+
+  MinimumX := MaxDouble;
+  MinimumY := MaxDouble;
+  MaximumX := -MaxDouble;
+  MaximumY := -MaxDouble;
+  for I := 0 to High(Polygon) do
+  begin
+    MinimumX := Min(MinimumX, Polygon[I].X);
+    MinimumY := Min(MinimumY, Polygon[I].Y);
+    MaximumX := Max(MaximumX, Polygon[I].X);
+    MaximumY := Max(MaximumY, Polygon[I].Y);
+  end;
+  Shake_PPP_DebugLog.DebugLog(Format(
+    'Deformation curve bounds: curve=%s normalized=(%.8f,%.8f)-(%.8f,%.8f) image=(%.3f,%.3f)-(%.3f,%.3f).',
+    [CurveName, MinimumX, MinimumY, MaximumX, MaximumY,
+     MinimumX * Max(1, Width - 1), MinimumY * Max(1, Height - 1),
+     MaximumX * Max(1, Width - 1), MaximumY * Max(1, Height - 1)]));
+end;
+{$ENDIF}
+
 procedure TShakeDeformationMap.Clear;
 begin
   FWeights := nil;
@@ -243,12 +284,21 @@ var
   GridX: Integer;
   GridY: Integer;
   Mask: TDoubleArray;
+  NormalizedX: Double;
+  NormalizedY: Double;
   OuterPolygon: TArray<TPointF>;
 {$IFDEF DEBUG}
+  AffectedBottom: Integer;
+  AffectedCount: NativeInt;
+  AffectedLeft: Integer;
+  AffectedRight: Integer;
+  AffectedTop: Integer;
+  ScreenY: Integer;
   StartedAt: UInt64;
 {$ENDIF}
   X: Integer;
   Y: Integer;
+  Weight: Double;
 begin
   Result := False;
   ErrorText := '';
@@ -279,6 +329,15 @@ begin
   SetLength(Mask, GridWidth * GridHeight);
 {$IFDEF DEBUG}
   StartedAt := GetTickCount64;
+  DebugLogCurveCoordinates('outer', OuterContour, OuterPolygon,
+    Width, Height);
+  DebugLogCurveCoordinates('center', CenterContour, CenterPolygon,
+    Width, Height);
+  AffectedLeft := Width;
+  AffectedTop := Height;
+  AffectedRight := -1;
+  AffectedBottom := -1;
+  AffectedCount := 0;
 {$ENDIF}
   for GridY := 0 to GridHeight - 1 do
     for GridX := 0 to GridWidth - 1 do
@@ -292,9 +351,37 @@ begin
   SetLength(FWeights, FWidth * FHeight);
   for Y := 0 to FHeight - 1 do
     for X := 0 to FWidth - 1 do
-      FWeights[Y * FWidth + X] :=
-        InterpolatedMask(Mask, GridWidth, GridHeight, X, Y);
+    begin
+      Weight := InterpolatedMask(Mask, GridWidth, GridHeight, X, Y);
+      if Weight > 0 then
+      begin
+        NormalizedX := X / Max(1, FWidth - 1);
+        NormalizedY := 1 - Y / Max(1, FHeight - 1);
+        if not PointInPolygon(OuterPolygon, NormalizedX, NormalizedY) then
+          Weight := 0;
+      end;
+      FWeights[Y * FWidth + X] := Weight;
 {$IFDEF DEBUG}
+      if Weight > 0 then
+      begin
+        ScreenY := FHeight - 1 - Y;
+        AffectedLeft := Min(AffectedLeft, X);
+        AffectedTop := Min(AffectedTop, ScreenY);
+        AffectedRight := Max(AffectedRight, X);
+        AffectedBottom := Max(AffectedBottom, ScreenY);
+        Inc(AffectedCount);
+      end;
+{$ENDIF}
+    end;
+{$IFDEF DEBUG}
+  if AffectedCount > 0 then
+    Shake_PPP_DebugLog.DebugLog(Format(
+      'Deformation affected bounds: image=(%d,%d)-(%d,%d) pixels=%d coordinateSpace=image-dpi-independent.',
+      [AffectedLeft, AffectedTop, AffectedRight, AffectedBottom,
+       AffectedCount]))
+  else
+    Shake_PPP_DebugLog.DebugLog(
+      'Deformation affected bounds: empty coordinateSpace=image-dpi-independent.');
   Shake_PPP_DebugLog.DebugLog(Format(
     'Deformation map built: size=%dx%d grid=%dx%d elapsed=%dms.',
     [FWidth, FHeight, GridWidth, GridHeight,
@@ -325,6 +412,7 @@ var
 {$ENDIF}
   Value: Double;
   Weight: Double;
+  WeightY: Integer;
   X: Integer;
   X0: Integer;
   X1: Integer;
@@ -357,14 +445,14 @@ begin
   for Y := 0 to Source.Height - 1 do
   begin
     DestinationRow := PByteRow(DestinationRows[Y]);
+    // Use the same top-origin curve coordinate space as the AviUtl2 output.
+    WeightY := FHeight - 1 - Y;
     for X := 0 to Source.Width - 1 do
     begin
-      Weight := FWeights[Y * FWidth + X];
+      Weight := FWeights[WeightY * FWidth + X];
       SourceX := EnsureRange(X - DisplacementX * Weight,
         0.0, Source.Width - 1.0);
-      // TBitmap scanlines run bottom-to-top, while curve Y and the public
-      // displacement use the screen's top-to-bottom coordinate system.
-      SourceY := EnsureRange(Y + DisplacementY * Weight,
+      SourceY := EnsureRange(Y - DisplacementY * Weight,
         0.0, Source.Height - 1.0);
       X0 := Trunc(SourceX);
       Y0 := Trunc(SourceY);
@@ -421,6 +509,7 @@ var
   SourceY: Double;
   Value: Double;
   Weight: Double;
+  WeightY: Integer;
   X: Integer;
   X0: Integer;
   X1: Integer;
@@ -439,9 +528,13 @@ begin
   SourceBytes := Source;
   DestinationBytes := Destination;
   for Y := 0 to FHeight - 1 do
+  begin
+    // AviUtl2 RGBA rows are top-to-bottom, while FWeights follows the
+    // bottom-to-top TBitmap scanline order used by the settings preview.
+    WeightY := FHeight - 1 - Y;
     for X := 0 to FWidth - 1 do
     begin
-      Weight := FWeights[Y * FWidth + X];
+      Weight := FWeights[WeightY * FWidth + X];
       SourceX := EnsureRange(X - DisplacementX * Weight,
         0.0, FWidth - 1.0);
       SourceY := EnsureRange(Y - DisplacementY * Weight,
@@ -466,6 +559,7 @@ begin
           EnsureRange(Round(Value), 0, 255);
       end;
     end;
+  end;
   Result := True;
 end;
 

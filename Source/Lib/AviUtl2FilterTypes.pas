@@ -55,6 +55,16 @@ type
     Num: Integer;
     FrameS: Integer;
     FrameE: Integer;
+    EffectLayer: Integer;
+  end;
+
+  POBJECT_IMAGE_PARAM = ^TOBJECT_IMAGE_PARAM;
+  TOBJECT_IMAGE_PARAM = record
+    X, Y, Z: Single;
+    RX, RY, RZ: Single;
+    SX, SY, SZ: Single;
+    CX, CY, CZ: Single;
+    Alpha: Single;
   end;
 
   TPIXEL_RGBA = packed record
@@ -63,6 +73,10 @@ type
   PPIXEL_RGBA = ^TPIXEL_RGBA;
 
   TFILTER_PROC_VIDEO_GET_TEX2D = function: Pointer; cdecl;
+  TFILTER_PROC_VIDEO_GET_OUTPUT_IMAGE_PARAM = function(Obj: OBJECT_HANDLE;
+    Offset: Double; Param: POBJECT_IMAGE_PARAM; ParamSize: Integer): Byte; cdecl;
+  TFILTER_PROC_VIDEO_GET_IMAGE_OBJECT = function(Layer: Integer;
+    Offset: Double): OBJECT_HANDLE; cdecl;
   PFILTER_PROC_VIDEO = ^TFILTER_PROC_VIDEO;
   TFILTER_PROC_VIDEO = record
     Scene: PSCENE_INFO;
@@ -71,6 +85,10 @@ type
     SetImageData: procedure(Buffer: PPIXEL_RGBA; Width, Height: Integer); cdecl;
     GetImageTexture2D: TFILTER_PROC_VIDEO_GET_TEX2D;
     GetFramebufferTexture2D: TFILTER_PROC_VIDEO_GET_TEX2D;
+    Edit: PEDIT_SECTION;
+    Param: POBJECT_IMAGE_PARAM;
+    GetOutputImageParam: TFILTER_PROC_VIDEO_GET_OUTPUT_IMAGE_PARAM;
+    GetImageObject: TFILTER_PROC_VIDEO_GET_IMAGE_OBJECT;
   end;
 
   TFuncProcVideo = function(Video: PFILTER_PROC_VIDEO): Byte; cdecl;

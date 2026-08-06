@@ -25,6 +25,9 @@ uses
   Shake_PPP_DebugLog,
   Shake_PPP_StaticDeformer;
 
+const
+  MAX_CONTINUOUS_FRAME_GAP = 10;
+
 type
   TShakeObjectState = class
   private
@@ -108,44 +111,72 @@ var
   Damping: Double;
   DeltaX: Double;
   DeltaY: Double;
+  FrameGap: Integer;
   InputGain: Double;
+  Step: Integer;
+  StepDeltaX: Double;
+  StepDeltaY: Double;
   Spring: Double;
 begin
-  if not FHasFrame or (Frame < FLastFrame) or (Frame > FLastFrame + 1) then
+  if not FHasFrame then
   begin
     ResetMotion(Frame, Settings.PositionX, Settings.PositionY);
     Exit;
   end;
   if Frame = FLastFrame then
     Exit;
+  if Frame < FLastFrame then
+  begin
+    DebugLog(Format('Runtime motion reset: frame moved backward from %d to %d.',
+      [FLastFrame, Frame]));
+    ResetMotion(Frame, Settings.PositionX, Settings.PositionY);
+    Exit;
+  end;
+
+  FrameGap := Frame - FLastFrame;
+  if FrameGap > MAX_CONTINUOUS_FRAME_GAP then
+  begin
+    DebugLog(Format('Runtime motion reset: frame gap=%d exceeds limit=%d.',
+      [FrameGap, MAX_CONTINUOUS_FRAME_GAP]));
+    ResetMotion(Frame, Settings.PositionX, Settings.PositionY);
+    Exit;
+  end;
 
   DeltaX := Settings.PositionX - FPreviousX;
   DeltaY := Settings.PositionY - FPreviousY;
+  StepDeltaX := DeltaX / FrameGap;
+  StepDeltaY := DeltaY / FrameGap;
   FPreviousX := Settings.PositionX;
   FPreviousY := Settings.PositionY;
   FLastFrame := Frame;
 
-  // The body moves immediately while the soft part remains behind.
   InputGain := Settings.Strength * (0.2 + Settings.Delay * 0.8);
-  FOffsetX := FOffsetX - DeltaX * InputGain;
-  FOffsetY := FOffsetY - DeltaY * InputGain;
-
-  // A softer spring returns more slowly. Duration controls energy loss.
   Spring := 0.28 - Settings.Softness * 0.20;
   Damping := 0.62 + Settings.Duration * 0.35;
-  FVelocityX := (FVelocityX - FOffsetX * Spring) * Damping;
-  FVelocityY := (FVelocityY - FOffsetY * Spring) * Damping;
-  FOffsetX := FOffsetX + FVelocityX;
-  FOffsetY := FOffsetY + FVelocityY;
+
+  // Reconstruct skipped playback frames with linear position interpolation.
+  // This preserves spring time and avoids treating normal frame drops as seeks.
+  for Step := 1 to FrameGap do
+  begin
+    // The body moves immediately while the soft part remains behind.
+    FOffsetX := FOffsetX - StepDeltaX * InputGain;
+    FOffsetY := FOffsetY - StepDeltaY * InputGain;
+
+    // A softer spring returns more slowly. Duration controls energy loss.
+    FVelocityX := (FVelocityX - FOffsetX * Spring) * Damping;
+    FVelocityY := (FVelocityY - FOffsetY * Spring) * Damping;
+    FOffsetX := FOffsetX + FVelocityX;
+    FOffsetY := FOffsetY + FVelocityY;
+  end;
 
   if ((Abs(DeltaX) > 0.0001) or (Abs(DeltaY) > 0.0001)) and
     ((FLastMotionLog = 0) or (GetTickCount64 - FLastMotionLog >= 500)) then
   begin
     FLastMotionLog := GetTickCount64;
     DebugLog(Format(
-      'Runtime motion: frame=%d position=%.1f,%.1f delta=%.1f,%.1f offset=%.1f,%.1f.',
-      [Frame, Settings.PositionX, Settings.PositionY, DeltaX, DeltaY,
-       FOffsetX, FOffsetY]));
+      'Runtime motion: frame=%d gap=%d position=%.1f,%.1f delta=%.1f,%.1f perFrame=%.1f,%.1f offset=%.1f,%.1f.',
+      [Frame, FrameGap, Settings.PositionX, Settings.PositionY, DeltaX, DeltaY,
+       StepDeltaX, StepDeltaY, FOffsetX, FOffsetY]));
   end;
 
   if (Abs(FOffsetX) < 0.005) and (Abs(FVelocityX) < 0.005) then

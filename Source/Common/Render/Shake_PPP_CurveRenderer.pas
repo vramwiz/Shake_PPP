@@ -126,7 +126,10 @@ begin
         Canvas.Pen.Color := RGB(255, 55, 205)
       else
         Canvas.Pen.Color := RGB(190, 50, 150);
-      Canvas.Pen.Width := Max(2, MulDiv(3, PPI, 96));
+      if IsActive then
+        Canvas.Pen.Width := Max(2, MulDiv(2, PPI, 96))
+      else
+        Canvas.Pen.Width := Max(1, MulDiv(2, PPI, 96));
     end
     else
     begin
@@ -157,18 +160,23 @@ begin
       VertexRect := Rect(VertexPoint.X - StartRadius,
         VertexPoint.Y - StartRadius, VertexPoint.X + StartRadius + 1,
         VertexPoint.Y + StartRadius + 1);
-      Canvas.Brush.Style := bsSolid;
-      Canvas.Brush.Color := RGB(80, 255, 120);
+      if Curve.Closed then
+        Canvas.Brush.Style := bsClear
+      else
+      begin
+        Canvas.Brush.Style := bsSolid;
+        Canvas.Brush.Color := RGB(80, 255, 120);
+      end;
       if I = SelectedVertex then
         Canvas.Pen.Color := clYellow
       else
-        Canvas.Pen.Color := clWhite;
+        Canvas.Pen.Color := RGB(80, 255, 120);
       Canvas.Rectangle(VertexRect);
       if Curve.Closed then
       begin
         InflateRect(VertexRect, -3, -3);
         Canvas.Brush.Style := bsClear;
-        Canvas.Pen.Color := RGB(20, 70, 35);
+        Canvas.Pen.Color := RGB(185, 255, 200);
         Canvas.Rectangle(VertexRect);
       end;
       Continue;

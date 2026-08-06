@@ -848,13 +848,9 @@ begin
   FOuterContour := FCurveSets[Index].OuterContour;
   FCenterContour := FCurveSets[Index].CenterContour;
   FSelectedVertex := -1;
-  FPanMode := False;
-  FMotionTimer.Enabled := False;
-  FShowDeformed := False;
-  UpdateToolbarSelection;
   MarkDeformationDirty;
-  SetEditorStatus;
-  PreviewPaintBox.Invalidate;
+  if FPanMode then
+    ResetMotionPreview;
 end;
 
 procedure TFormShakeSettings.PreviewPaintBoxMouseMove(Sender: TObject;
