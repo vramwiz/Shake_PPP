@@ -6,7 +6,7 @@
     "summary": "画像の一部分をオブジェクト移動に合わせて柔らかく揺らすフィルター",
     "description": "https://raw.githubusercontent.com/vramwiz/Shake_PPP/main/README.md",
     "author": "VRAMの魔術師",
-    "repoURL": "https://github.com/vramwiz/Shake_PPP/",
+    "repoURL": "https://github.com/vramwiz/Shake_PPP",
     "licenses": [
       {
         "type": "不明",
@@ -24,6 +24,9 @@
     "images": [],
     "installer": {
       "source": {
+        "direct": null,
+        "booth": null,
+        "GoogleDrive": null,
         "github": {
           "owner": "vramwiz",
           "repo": "Shake_PPP",

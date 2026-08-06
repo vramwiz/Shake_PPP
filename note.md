@@ -378,3 +378,5 @@ C:\ProgramData\aviutl2\Plugin\Shake_PPP\Shake_PPP.auf2
 - 2026-08-06: 複雑な形状編集と揺れ設定を利用者向けに説明する`README.md`を追加した。導入、最短手順、ツールバーとマウス操作、形状作成のコツ、全AviUtl2設定、調整例、トラブルシューティング、現在の制限、開発者向けビルド手順を現在の実装に合わせて記載した。
 - 2026-08-06: `SYNC_Motion`の配布構成を基に`Setup`フォルダーを追加した。`make_release_zip.bat`からPowerShellスクリプトを呼び出し、Release版`Shake_PPP.auf2`と`README.md`を`Shake_PPP`フォルダーへまとめた`Shake_PPP.zip`を生成する。Debug用DLL/RSMが残っている場合は誤配布防止のため中止する。GitHub Release向けの`Shake_PPP.catalog.json`も追加した。
 - 2026-08-06: AviUtl2カタログv0.3.3の登録画面でGitHub Owner・Repo・正規表現の3項目が読み込まれなかったため、`installer.source`から新形式の`type/owner/repo/pattern`混在部分を削除した。v0.3.3のスキーマとインストール済みカタログ実例に合わせ、`source.github.owner/repo/pattern`だけを持つ形式へ統一した。
+- 2026-08-06: READMEの関連リンクへ正式なGitHubリポジトリ`https://github.com/vramwiz/Shake_PPP`を追加し、カタログJSONの`repoURL`も末尾空白や余分な区切りを含まない同じURLへ統一した。
+- 2026-08-06: カタログv0.3.3のJSON入力が新規項目の初期値`source.direct=""`と`source.github`を深くマージし、direct側を優先してGitHubの3項目を捨てる挙動を確認した。JSONパッチで`direct`・`booth`・`GoogleDrive`を`null`へ明示的に上書きして各候補を無効化し、`github`分岐だけがスキーマ検証を通る形式へ変更した。README外部URLは公開確認済みの`https://raw.githubusercontent.com/vramwiz/Shake_PPP/main/README.md`を維持する。
