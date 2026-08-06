@@ -99,6 +99,7 @@ type
     procedure MotionTimerTick(Sender: TObject);
     procedure ResetMotionPreview;
     procedure SwitchCurveSet(Index: Integer);
+    procedure UpdateToolbarSelection;
     function UpdateDeformedPreview: Boolean;
     procedure SetEditorStatus;
     procedure ToolbarButtonExecute(Sender: TObject;
@@ -333,7 +334,13 @@ begin
     Exit;
   GetCursorPos(PointerPosition);
   PointerPosition := PreviewPaintBox.ScreenToClient(PointerPosition);
-  if GetAsyncKeyState(VK_LBUTTON) < 0 then
+  { Polling is only a fallback for a drag that starts over the preview.
+    Without this bounds check, clicking a toolbar button while preview mode is
+    active steals mouse capture to PreviewPaintBox before the button receives
+    MouseUp, leaving toolbar buttons visually and logically pressed. }
+  if (GetAsyncKeyState(VK_LBUTTON) < 0) and
+    (FMotionDragging or PtInRect(PreviewPaintBox.ClientRect,
+      PointerPosition)) then
   begin
     if not FMotionDragging then
     begin
@@ -491,6 +498,10 @@ const
   TOOLBAR_FIT = 8;
   TOOLBAR_CURVE_SET_1 = 9;
   TOOLBAR_CURVE_SET_2 = 10;
+  TOOLBAR_GROUP_CURVE_SET = 1;
+  TOOLBAR_GROUP_EDIT_MODE = 2;
+  TOOLBAR_GROUP_VERTEX_KIND = 3;
+  TOOLBAR_GROUP_VIEW = 4;
 var
   Extent: Integer;
 begin
@@ -505,35 +516,87 @@ begin
   FToolbar.ParentBackground := False;
   FToolbar.OnButtonExecute := ToolbarButtonExecute;
   FToolbarCurveSet1 := FToolbar.AddToggle('形状セット1',
-    stgCurveSet1, TOOLBAR_CURVE_SET_1);
+    stgCurveSet1, TOOLBAR_CURVE_SET_1, TOOLBAR_GROUP_CURVE_SET);
   FToolbarCurveSet2 := FToolbar.AddToggle('形状セット2',
-    stgCurveSet2, TOOLBAR_CURVE_SET_2);
+    stgCurveSet2, TOOLBAR_CURVE_SET_2, TOOLBAR_GROUP_CURVE_SET);
   FToolbar.AddSeparator;
   FToolbarOuterContour := FToolbar.AddToggle('外周を編集',
-    stgOuterContour, TOOLBAR_OUTER_CONTOUR);
+    stgOuterContour, TOOLBAR_OUTER_CONTOUR, TOOLBAR_GROUP_EDIT_MODE);
   FToolbarCenterContour := FToolbar.AddToggle('重心・頂点範囲を編集',
-    stgCenterContour, TOOLBAR_CENTER_CONTOUR);
+    stgCenterContour, TOOLBAR_CENTER_CONTOUR, TOOLBAR_GROUP_EDIT_MODE);
   FToolbar.AddSeparator;
   FToolbarPan := FToolbar.AddToggle(
     '動作プレビュー（左ドラッグで画像を移動して揺らす）',
-    stgMotionPreview, TOOLBAR_PAN);
+    stgMotionPreview, TOOLBAR_PAN, TOOLBAR_GROUP_EDIT_MODE);
   FToolbar.AddSeparator;
   FToolbarCornerPoint := FToolbar.AddToggle('鋭角頂点',
-    stgCornerPoint, TOOLBAR_CORNER_POINT);
+    stgCornerPoint, TOOLBAR_CORNER_POINT, TOOLBAR_GROUP_VERTEX_KIND);
   FToolbarSmoothPoint := FToolbar.AddToggle('滑らかな頂点',
-    stgSmoothPoint, TOOLBAR_SMOOTH_POINT);
+    stgSmoothPoint, TOOLBAR_SMOOTH_POINT, TOOLBAR_GROUP_VERTEX_KIND);
   FToolbar.AddSeparator;
   FToolbarOriginalView := FToolbar.AddToggle('元画像',
-    stgOriginalView, TOOLBAR_ORIGINAL_VIEW);
+    stgOriginalView, TOOLBAR_ORIGINAL_VIEW, TOOLBAR_GROUP_VIEW);
   FToolbarDeformedView := FToolbar.AddToggle('固定量の変形プレビュー',
-    stgDeformedView, TOOLBAR_DEFORMED_VIEW);
+    stgDeformedView, TOOLBAR_DEFORMED_VIEW, TOOLBAR_GROUP_VIEW);
   FToolbar.AddCommand('全体表示', stgFit, TOOLBAR_FIT);
-  FToolbarOuterContour.CheckState := stcsChecked;
-  FToolbarCurveSet1.CheckState := stcsChecked;
-  FToolbarSmoothPoint.CheckState := stcsChecked;
-  FToolbarOriginalView.CheckState := stcsChecked;
   FPanMode := False;
   FShowDeformed := False;
+  UpdateToolbarSelection;
+end;
+
+procedure TFormShakeSettings.UpdateToolbarSelection;
+begin
+  if FActiveCurveSetIndex = 0 then
+  begin
+    FToolbarCurveSet1.CheckState := stcsChecked;
+    FToolbarCurveSet2.CheckState := stcsUnchecked;
+  end
+  else
+  begin
+    FToolbarCurveSet1.CheckState := stcsUnchecked;
+    FToolbarCurveSet2.CheckState := stcsChecked;
+  end;
+
+  if FPanMode then
+  begin
+    FToolbarOuterContour.CheckState := stcsUnchecked;
+    FToolbarCenterContour.CheckState := stcsUnchecked;
+    FToolbarPan.CheckState := stcsChecked;
+  end
+  else if FActiveCurveKind = sckOuterContour then
+  begin
+    FToolbarOuterContour.CheckState := stcsChecked;
+    FToolbarCenterContour.CheckState := stcsUnchecked;
+    FToolbarPan.CheckState := stcsUnchecked;
+  end
+  else
+  begin
+    FToolbarOuterContour.CheckState := stcsUnchecked;
+    FToolbarCenterContour.CheckState := stcsChecked;
+    FToolbarPan.CheckState := stcsUnchecked;
+  end;
+
+  if FCurrentVertexKind = svkCorner then
+  begin
+    FToolbarCornerPoint.CheckState := stcsChecked;
+    FToolbarSmoothPoint.CheckState := stcsUnchecked;
+  end
+  else
+  begin
+    FToolbarCornerPoint.CheckState := stcsUnchecked;
+    FToolbarSmoothPoint.CheckState := stcsChecked;
+  end;
+
+  if FShowDeformed then
+  begin
+    FToolbarOriginalView.CheckState := stcsUnchecked;
+    FToolbarDeformedView.CheckState := stcsChecked;
+  end
+  else
+  begin
+    FToolbarOriginalView.CheckState := stcsChecked;
+    FToolbarDeformedView.CheckState := stcsUnchecked;
+  end;
 end;
 
 procedure TFormShakeSettings.FitImage;
@@ -712,59 +775,29 @@ begin
       begin
         FActiveCurveKind := sckOuterContour;
         FSelectedVertex := -1;
-        FToolbarOuterContour.CheckState := stcsChecked;
-        FToolbarCenterContour.CheckState := stcsUnchecked;
-        FToolbarPan.CheckState := stcsUnchecked;
         FPanMode := False;
         FMotionTimer.Enabled := False;
         FShowDeformed := False;
-        FToolbarOriginalView.CheckState := stcsChecked;
-        FToolbarDeformedView.CheckState := stcsUnchecked;
       end;
     2:
       begin
         FActiveCurveKind := sckCenterContour;
         FSelectedVertex := -1;
-        FToolbarOuterContour.CheckState := stcsUnchecked;
-        FToolbarCenterContour.CheckState := stcsChecked;
-        FToolbarPan.CheckState := stcsUnchecked;
         FPanMode := False;
         FMotionTimer.Enabled := False;
         FShowDeformed := False;
-        FToolbarOriginalView.CheckState := stcsChecked;
-        FToolbarDeformedView.CheckState := stcsUnchecked;
       end;
     3:
       begin
-        FPanMode := not FPanMode;
-        if FPanMode then
-        begin
-          FToolbarOuterContour.CheckState := stcsUnchecked;
-          FToolbarCenterContour.CheckState := stcsUnchecked;
-          FToolbarPan.CheckState := stcsChecked;
-          FShowDeformed := True;
-          FToolbarOriginalView.CheckState := stcsUnchecked;
-          FToolbarDeformedView.CheckState := stcsChecked;
-          ResetMotionPreview;
-        end
-        else
-        begin
-          FToolbarPan.CheckState := stcsUnchecked;
-          FShowDeformed := False;
-          FMotionTimer.Enabled := False;
-          FToolbarOriginalView.CheckState := stcsChecked;
-          FToolbarDeformedView.CheckState := stcsUnchecked;
-          if FActiveCurveKind = sckOuterContour then
-            FToolbarOuterContour.CheckState := stcsChecked
-          else
-            FToolbarCenterContour.CheckState := stcsChecked;
-        end;
+        { This is a radio-style mode button. Repeated clicks keep motion
+          preview selected; another edit-mode button is used to leave it. }
+        FPanMode := True;
+        FShowDeformed := True;
+        ResetMotionPreview;
       end;
     4:
       begin
         FCurrentVertexKind := svkCorner;
-        FToolbarCornerPoint.CheckState := stcsChecked;
-        FToolbarSmoothPoint.CheckState := stcsUnchecked;
         if FSelectedVertex >= 0 then
         begin
           ActiveCurve.SetVertexKind(FSelectedVertex, FCurrentVertexKind);
@@ -774,8 +807,6 @@ begin
     5:
       begin
         FCurrentVertexKind := svkSmooth;
-        FToolbarCornerPoint.CheckState := stcsUnchecked;
-        FToolbarSmoothPoint.CheckState := stcsChecked;
         if FSelectedVertex >= 0 then
         begin
           ActiveCurve.SetVertexKind(FSelectedVertex, FCurrentVertexKind);
@@ -784,18 +815,16 @@ begin
       end;
     6:
       begin
+        { Original view and motion preview cannot be active together. }
+        FPanMode := False;
         FShowDeformed := False;
         FMotionTimer.Enabled := False;
-        FToolbarOriginalView.CheckState := stcsChecked;
-        FToolbarDeformedView.CheckState := stcsUnchecked;
       end;
     7:
       begin
         FShowDeformed := True;
         if FPanMode then
           ResetMotionPreview;
-        FToolbarOriginalView.CheckState := stcsUnchecked;
-        FToolbarDeformedView.CheckState := stcsChecked;
       end;
     8:
       FitImage;
@@ -804,6 +833,7 @@ begin
     10:
       SwitchCurveSet(1);
   end;
+  UpdateToolbarSelection;
   SetEditorStatus;
   if FShowDeformed and not FPanMode then
     UpdateDeformedPreview;
@@ -821,23 +851,7 @@ begin
   FPanMode := False;
   FMotionTimer.Enabled := False;
   FShowDeformed := False;
-  FToolbarCurveSet1.CheckState := TShakeToolbarCheckState(
-    Ord(Index = 0));
-  FToolbarCurveSet2.CheckState := TShakeToolbarCheckState(
-    Ord(Index = 1));
-  FToolbarPan.CheckState := stcsUnchecked;
-  FToolbarOriginalView.CheckState := stcsChecked;
-  FToolbarDeformedView.CheckState := stcsUnchecked;
-  if FActiveCurveKind = sckOuterContour then
-  begin
-    FToolbarOuterContour.CheckState := stcsChecked;
-    FToolbarCenterContour.CheckState := stcsUnchecked;
-  end
-  else
-  begin
-    FToolbarOuterContour.CheckState := stcsUnchecked;
-    FToolbarCenterContour.CheckState := stcsChecked;
-  end;
+  UpdateToolbarSelection;
   MarkDeformationDirty;
   SetEditorStatus;
   PreviewPaintBox.Invalidate;

@@ -39,6 +39,7 @@ type
   private
     FCheckState: TShakeToolbarCheckState;
     FGlyph: TShakeToolbarGlyph;
+    FGroupIndex: Integer;
     FHot: Boolean;
     FKind: TShakeToolbarButtonKind;
     FOnExecute: TShakeToolbarButtonExecuteEvent;
@@ -57,6 +58,7 @@ type
     constructor Create(AOwner: TComponent); override;
     procedure Execute;
     property Glyph: TShakeToolbarGlyph read FGlyph write FGlyph;
+    property GroupIndex: Integer read FGroupIndex write FGroupIndex;
     property Kind: TShakeToolbarButtonKind read FKind write FKind;
     property OnExecute: TShakeToolbarButtonExecuteEvent read FOnExecute
       write FOnExecute;
@@ -86,12 +88,13 @@ type
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     function AddButton(const HintText: string; Glyph: TShakeToolbarGlyph;
-      Kind: TShakeToolbarButtonKind; TagValue: NativeInt):
+      Kind: TShakeToolbarButtonKind; TagValue: NativeInt;
+      GroupIndex: Integer = 0):
       TShakeToolbarButton;
     function AddCommand(const HintText: string; Glyph: TShakeToolbarGlyph;
       TagValue: NativeInt): TShakeToolbarButton;
     function AddToggle(const HintText: string; Glyph: TShakeToolbarGlyph;
-      TagValue: NativeInt): TShakeToolbarButton;
+      TagValue: NativeInt; GroupIndex: Integer = 0): TShakeToolbarButton;
     procedure AddSeparator;
     property ButtonExtent: Integer read FButtonExtent write FButtonExtent;
     property SeparatorExtent: Integer read FSeparatorExtent
@@ -134,6 +137,7 @@ begin
   inherited;
   ControlStyle := ControlStyle + [csClickEvents, csCaptureMouse];
   FCheckState := stcsUnchecked;
+  FGroupIndex := 0;
   FKind := stbkCommand;
   ParentShowHint := True;
   TabStop := True;
@@ -222,11 +226,14 @@ begin
   else if FCheckState = stcsChecked then
     BackColor := BlendColor(BackColor, clHighlight, 65)
   else if FHot then
-    BackColor := BlendColor(BackColor, clHighlight, 28);
+    BackColor := BlendColor(BackColor, clWhite, 10);
+  { Glyph drawing leaves the brush transparent. Restore it before clearing the
+    control or an old checked background remains visible after unchecking. }
+  Canvas.Brush.Style := bsSolid;
   Canvas.Brush.Color := BackColor;
   Canvas.Pen.Color := BackColor;
   Canvas.Rectangle(ClientRect);
-  if FPressed or FHot or (FCheckState = stcsChecked) then
+  if FPressed or (FCheckState = stcsChecked) then
   begin
     Canvas.Brush.Style := bsClear;
     Canvas.Pen.Color := BorderColor;
@@ -376,7 +383,7 @@ end;
 
 function TShakeToolbarButtons.AddButton(const HintText: string;
   Glyph: TShakeToolbarGlyph; Kind: TShakeToolbarButtonKind;
-  TagValue: NativeInt): TShakeToolbarButton;
+  TagValue: NativeInt; GroupIndex: Integer): TShakeToolbarButton;
 begin
   Result := TShakeToolbarButton.Create(Self);
   Result.Parent := Self;
@@ -384,6 +391,7 @@ begin
   Result.ShowHint := True;
   Result.Glyph := Glyph;
   Result.Kind := Kind;
+  Result.GroupIndex := GroupIndex;
   Result.Tag := TagValue;
   Result.FOwnerExecute := ButtonExecute;
   FItems.Add(Result);
@@ -397,9 +405,10 @@ begin
 end;
 
 function TShakeToolbarButtons.AddToggle(const HintText: string;
-  Glyph: TShakeToolbarGlyph; TagValue: NativeInt): TShakeToolbarButton;
+  Glyph: TShakeToolbarGlyph; TagValue: NativeInt;
+  GroupIndex: Integer): TShakeToolbarButton;
 begin
-  Result := AddButton(HintText, Glyph, stbkToggle, TagValue);
+  Result := AddButton(HintText, Glyph, stbkToggle, TagValue, GroupIndex);
 end;
 
 procedure TShakeToolbarButtons.AddSeparator;
@@ -409,7 +418,20 @@ end;
 
 procedure TShakeToolbarButtons.ButtonExecute(Sender: TObject;
   Button: TShakeToolbarButton);
+var
+  Item: TShakeToolbarButton;
 begin
+  { Radio groups are enforced here, independently of the form state.  This
+    prevents a delayed repaint or a future handler change from leaving two
+    mutually exclusive tools selected. }
+  if (Button.Kind = stbkToggle) and (Button.GroupIndex > 0) then
+    for Item in FItems do
+      if (Item.Kind = stbkToggle) and
+        (Item.GroupIndex = Button.GroupIndex) then
+        if Item = Button then
+          Item.CheckState := stcsChecked
+        else
+          Item.CheckState := stcsUnchecked;
   if Assigned(FOnButtonExecute) then
     FOnButtonExecute(Self, Button);
 end;
