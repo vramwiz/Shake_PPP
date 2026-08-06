@@ -6,8 +6,28 @@ interface
 
 type
   LPCWSTR = PWideChar;
-  PEDIT_SECTION = Pointer;
+  OBJECT_HANDLE = Pointer;
+
+  PEDIT_SECTION = ^TEDIT_SECTION;
   TFilterItemButtonCallback = procedure(Edit: PEDIT_SECTION); cdecl;
+  TSetObjectItemValueFunc = function(Obj: OBJECT_HANDLE; Effect: LPCWSTR;
+    Item: LPCWSTR; Value: PAnsiChar): LongBool; cdecl;
+  TGetFocusObjectFunc = function: OBJECT_HANDLE; cdecl;
+
+  // AviUtl2 SDKの先頭からGetFocusObjectまでと同じ配置。
+  TEDIT_SECTION = record
+    Info: Pointer;
+    CreateObjectFromAlias: Pointer;
+    FindObject: Pointer;
+    CountObjectEffect: Pointer;
+    GetObjectLayerFrame: Pointer;
+    GetObjectAlias: Pointer;
+    GetObjectItemValue: Pointer;
+    SetObjectItemValue: TSetObjectItemValueFunc;
+    MoveObject: Pointer;
+    DeleteObject: Pointer;
+    GetFocusObject: TGetFocusObjectFunc;
+  end;
 
   PSCENE_INFO = ^TSCENE_INFO;
   TSCENE_INFO = record
@@ -56,6 +76,13 @@ type
   TFuncProcVideo = function(Video: PFILTER_PROC_VIDEO): Byte; cdecl;
   TFuncProcAudio = function(Audio: Pointer): Byte; cdecl;
 
+  PFILTER_ITEM_STRING = ^TFILTER_ITEM_STRING;
+  TFILTER_ITEM_STRING = record
+    ItemType: LPCWSTR;
+    Name: LPCWSTR;
+    Value: LPCWSTR;
+  end;
+
   PFILTER_ITEM_TRACK = ^TFILTER_ITEM_TRACK;
   TFILTER_ITEM_TRACK = record
     ItemType: LPCWSTR;
@@ -64,6 +91,13 @@ type
     S: Double;
     E: Double;
     Step: Double;
+  end;
+
+  PFILTER_ITEM_CHECK = ^TFILTER_ITEM_CHECK;
+  TFILTER_ITEM_CHECK = record
+    ItemType: LPCWSTR;
+    Name: LPCWSTR;
+    Value: Byte;
   end;
 
   PFILTER_ITEM_BUTTON = ^TFILTER_ITEM_BUTTON;

@@ -95,6 +95,12 @@
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
         <DCCReference Include="Source\Lib\AviUtl2FilterTypes.pas"/>
+        <DCCReference Include="Source\Lib\Shake_PPP_ToolbarButtons.pas"/>
+        <DCCReference Include="Source\Common\Model\Shake_PPP_CurveModel.pas"/>
+        <DCCReference Include="Source\Common\Model\Shake_PPP_CurveData.pas"/>
+        <DCCReference Include="Source\Common\Settings\Shake_PPP_FilterSettings.pas"/>
+        <DCCReference Include="Source\Common\Render\Shake_PPP_CurveRenderer.pas"/>
+        <DCCReference Include="Source\Common\Render\Shake_PPP_StaticDeformer.pas"/>
         <DCCReference Include="Source\Common\Diagnostics\Shake_PPP_DebugLog.pas"/>
         <DCCReference Include="Source\Common\Render\Shake_PPP_LastFrameCapture.pas"/>
         <DCCReference Include="Source\Plugin\Filter\Shake_PPP_SettingsForm.pas">

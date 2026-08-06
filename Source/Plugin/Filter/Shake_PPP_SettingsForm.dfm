@@ -20,7 +20,7 @@ object FormShakeSettings: TFormShakeSettings
     Left = 0
     Top = 64
     Width = 960
-    Height = 528
+    Height = 576
     Align = alClient
     OnDblClick = PreviewPaintBoxDblClick
     OnMouseDown = PreviewPaintBoxMouseDown
@@ -28,7 +28,7 @@ object FormShakeSettings: TFormShakeSettings
     OnMouseUp = PreviewPaintBoxMouseUp
     OnPaint = PreviewPaintBoxPaint
     ExplicitTop = 56
-    ExplicitHeight = 536
+    ExplicitHeight = 584
   end
   object TopPanel: TPanel
     Left = 0
@@ -38,13 +38,6 @@ object FormShakeSettings: TFormShakeSettings
     Align = alTop
     BevelOuter = bvNone
     TabOrder = 0
-    object ZoomLabel: TLabel
-      Left = 284
-      Top = 10
-      Width = 20
-      Height = 15
-      Caption = 'Fit'
-    end
     object StatusLabel: TLabel
       Left = 12
       Top = 39
@@ -54,50 +47,5 @@ object FormShakeSettings: TFormShakeSettings
       Caption = 'No framebuffer has been captured.'
       EllipsisPosition = epEndEllipsis
     end
-    object FitButton: TButton
-      Left = 12
-      Top = 6
-      Width = 90
-      Height = 27
-      Caption = #20840#20307#34920#31034
-      TabOrder = 0
-      OnClick = FitButtonClick
-    end
-    object ZoomTrackBar: TTrackBar
-      Left = 112
-      Top = 4
-      Width = 160
-      Height = 32
-      Max = 400
-      Min = 25
-      Frequency = 25
-      Position = 100
-      ShowSelRange = False
-      TabOrder = 1
-      ThumbLength = 16
-      TickMarks = tmBoth
-      TickStyle = tsNone
-      OnChange = ZoomTrackBarChange
-    end
-  end
-  object BottomPanel: TPanel
-    Left = 0
-    Top = 592
-    Width = 960
-    Height = 48
-    Align = alBottom
-    BevelOuter = bvNone
-    TabOrder = 1
-    object CloseButton: TButton
-      Left = 864
-      Top = 10
-      Width = 84
-      Height = 28
-      Anchors = [akTop, akRight]
-      Caption = #38281#12376#12427
-      ModalResult = 8
-      TabOrder = 0
-    end
   end
 end
-
