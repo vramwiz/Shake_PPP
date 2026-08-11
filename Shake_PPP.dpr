@@ -4,7 +4,9 @@
 
 uses
   Winapi.Windows,
-  AviUtl2FilterTypes in 'Source\Lib\AviUtl2FilterTypes.pas',
+  AviUtl2FilterTypes in '..\Syncroh2\AviUtl\Filter\AviUtl2FilterTypes.pas',
+  AviUtl2FilterInfoUtils in '..\Syncroh2\AviUtl\Filter\AviUtl2FilterInfoUtils.pas',
+  PluginFilterTable in '..\Syncroh2\Plugin_Filter\PluginFilterTable.pas',
   Shake_PPP_ToolbarButtons in 'Source\Lib\Shake_PPP_ToolbarButtons.pas',
   Shake_PPP_CurveModel in 'Source\Common\Model\Shake_PPP_CurveModel.pas',
   Shake_PPP_CurveData in 'Source\Common\Model\Shake_PPP_CurveData.pas',

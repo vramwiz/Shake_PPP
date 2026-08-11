@@ -94,7 +94,9 @@
         <DelphiCompile Include="$(MainSource)">
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
-        <DCCReference Include="Source\Lib\AviUtl2FilterTypes.pas"/>
+        <DCCReference Include="..\Syncroh2\AviUtl\Filter\AviUtl2FilterTypes.pas"/>
+        <DCCReference Include="..\Syncroh2\AviUtl\Filter\AviUtl2FilterInfoUtils.pas"/>
+        <DCCReference Include="..\Syncroh2\Plugin_Filter\PluginFilterTable.pas"/>
         <DCCReference Include="Source\Lib\Shake_PPP_ToolbarButtons.pas"/>
         <DCCReference Include="Source\Common\Model\Shake_PPP_CurveModel.pas"/>
         <DCCReference Include="Source\Common\Model\Shake_PPP_CurveData.pas"/>

@@ -20,6 +20,7 @@ uses
   System.Math,
   System.SysUtils,
   Winapi.Windows,
+  AviUtl2FilterInfoUtils,
   Shake_PPP_CurveData,
   Shake_PPP_CurveModel,
   Shake_PPP_DebugLog,
@@ -414,7 +415,7 @@ begin
     Exit;
   Width := Video^.Object_^.Width;
   Height := Video^.Object_^.Height;
-  Frame := Video^.Object_^.Frame;
+  Frame := AviUtl2GetVideoFrame(Video);
   if (Width <= 0) or (Height <= 0) or
     (NativeInt(Width) > High(NativeInt) div Height div 4) then
     Exit;

@@ -177,7 +177,7 @@ AviUtl2を起動中の場合は、終了してからファイルを更新して�
 
 ## 開発者向けビルド
 
-Delphi 37.0でWin64を対象にビルドします。DebugとReleaseの両構成があります。
+Delphi 37.0でWin64を対象にビルドします。DebugとReleaseの両構成があります。SDK型定義、フィルター設定項目の登録、オブジェクト情報取得は`D:\DelphiProg\Syncroh2`の共通ユニットを参照するため、`Shake_PPP`と`Syncroh2`を同じ親フォルダーに配置してください。
 
 ```powershell
 cmd /c 'call "C:\Program Files (x86)\Embarcadero\Studio\37.0\bin\rsvars.bat" && msbuild "D:\DelphiProg\Shake_PPP\Shake_PPP.dproj" /t:Build /p:Config=Debug /p:Platform=Win64'

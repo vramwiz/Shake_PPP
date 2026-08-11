@@ -15,62 +15,29 @@ implementation
 uses
   System.SysUtils,
   System.UITypes,
+  AviUtl2FilterInfoUtils,
   Vcl.Dialogs,
   Vcl.Forms,
   Shake_PPP_DebugLog,
   Shake_PPP_FilterSettings,
   Shake_PPP_LastFrameCapture,
   Shake_PPP_RuntimeDeformer,
-  Shake_PPP_SettingsForm;
+  Shake_PPP_SettingsForm,
+  PluginFilterTable;
 
 const
   FILTER_EFFECT_NAME = '胸揺れ';
   CURVE_DATA_ITEM_NAME = '形状データ';
 
 var
-  CurveDataItem: TFILTER_ITEM_STRING = (
-    ItemType: 'string';
-    Name: '形状データ';
-    Value: ''
-  );
+  CurveDataItem: TFILTER_ITEM_STRING;
 {$IFDEF DEBUG}
   LastRuntimeInputLogTick: UInt64;
 {$ENDIF}
 
-function TryUseObjectPosition(Video: PFILTER_PROC_VIDEO;
-  var Settings: TShakeRuntimeSettings; out OutputParamX, OutputParamY,
-  RelativeParamX, RelativeParamY: Double): Boolean;
-var
-  OutputParam: TOBJECT_IMAGE_PARAM;
-begin
-  Result := False;
-  OutputParamX := 0;
-  OutputParamY := 0;
-  RelativeParamX := 0;
-  RelativeParamY := 0;
-  if (Video = nil) or not Assigned(Video^.GetOutputImageParam) then
-    Exit;
-
-  FillChar(OutputParam, SizeOf(OutputParam), 0);
-  if Video^.GetOutputImageParam(nil, 0, @OutputParam,
-    SizeOf(OutputParam)) = 0 then
-    Exit;
-
-  OutputParamX := OutputParam.X;
-  OutputParamY := OutputParam.Y;
-  if Video^.Param <> nil then
-  begin
-    RelativeParamX := Video^.Param^.X;
-    RelativeParamY := Video^.Param^.Y;
-  end;
-  Settings.PositionX := OutputParamX + RelativeParamX;
-  Settings.PositionY := OutputParamY + RelativeParamY;
-  Result := True;
-end;
-
 procedure DebugLogRuntimeInput(Video: PFILTER_PROC_VIDEO;
   const Settings: TShakeRuntimeSettings; ObjectPositionUsed: Boolean;
-  OutputParamX, OutputParamY, RelativeParamX, RelativeParamY: Double);
+  const Position: TAviUtl2ObjectPosition);
 {$IFDEF DEBUG}
 var
   CurrentTick: UInt64;
@@ -116,7 +83,8 @@ begin
      BoolToStr(RelativeParamAvailable, True), TimeAxisEnabledItem.Value,
      BoolToStr(Settings.TimeAxisEnabled, True),
      PositionSource,
-     OutputParamX, OutputParamY, RelativeParamX, RelativeParamY,
+     Position.OutputX, Position.OutputY,
+     Position.RelativeX, Position.RelativeY,
      Settings.PositionX, Settings.PositionY]));
 {$ENDIF}
 end;
@@ -125,10 +93,7 @@ function EmptyProcVideo(Video: PFILTER_PROC_VIDEO): Byte; cdecl;
 var
   CurveDataText: string;
   ObjectPositionUsed: Boolean;
-  OutputParamX: Double;
-  OutputParamY: Double;
-  RelativeParamX: Double;
-  RelativeParamY: Double;
+  Position: TAviUtl2ObjectPosition;
   RuntimeSettings: TShakeRuntimeSettings;
 begin
   try
@@ -137,10 +102,14 @@ begin
     if Assigned(CurveDataItem.Value) then
       CurveDataText := string(CurveDataItem.Value);
     RuntimeSettings := CurrentShakeRuntimeSettings;
-    ObjectPositionUsed := TryUseObjectPosition(Video, RuntimeSettings,
-      OutputParamX, OutputParamY, RelativeParamX, RelativeParamY);
+    ObjectPositionUsed := AviUtl2TryGetObjectPosition(Video, Position);
+    if ObjectPositionUsed then
+    begin
+      RuntimeSettings.PositionX := Position.X;
+      RuntimeSettings.PositionY := Position.Y;
+    end;
     DebugLogRuntimeInput(Video, RuntimeSettings, ObjectPositionUsed,
-      OutputParamX, OutputParamY, RelativeParamX, RelativeParamY);
+      Position);
     ApplyRuntimeDeformation(Video, CurveDataText, RuntimeSettings);
   except
     on E: Exception do
@@ -224,21 +193,7 @@ begin
 end;
 
 var
-  SettingsButton: TFILTER_ITEM_BUTTON = (
-    ItemType: 'button';
-    Name: '設定';
-    Callback: SettingsButtonCallback
-  );
-  PluginItems: array[0..11] of Pointer;
-  Plugin: TFILTER_PLUGIN_TABLE = (
-    Flag: FILTER_FLAG_VIDEO or FILTER_FLAG_FILTER;
-    Name: '胸揺れ';
-    Label_: 'SYNC';
-    Information: '胸揺れフィルタープラグイン';
-    Items: nil;
-    Func_Proc_Video: EmptyProcVideo;
-    Func_Proc_Audio: nil
-  );
+  SettingsButton: TFILTER_ITEM_BUTTON;
 
 function InitializeShakePlugin(Version: DWORD): Byte;
 begin
@@ -261,23 +216,16 @@ end;
 
 function GetShakeFilterTable: PFILTER_PLUGIN_TABLE;
 begin
-  if Plugin.Items = nil then
+  if GTable.Name = nil then
   begin
-    PluginItems[0] := @SettingsButton;
-    PluginItems[1] := @DeformationTypeItem;
-    PluginItems[2] := @TimeAxisEnabledItem;
-    PluginItems[3] := @StrengthItem;
-    PluginItems[4] := @DelayItem;
-    PluginItems[5] := @SoftnessItem;
-    PluginItems[6] := @DurationItem;
-    PluginItems[7] := @MaximumDeformationItem;
-    PluginItems[8] := @HorizontalInfluenceItem;
-    PluginItems[9] := @VerticalInfluenceItem;
-    PluginItems[10] := @CurveDataItem;
-    PluginItems[11] := nil;
-    Plugin.Items := @PluginItems[0];
+    AddButton(SettingsButton, '設定', SettingsButtonCallback);
+    AddShakeFilterItems;
+    AddString(CurveDataItem, CURVE_DATA_ITEM_NAME, '');
+    SetupPluginTable(FILTER_FLAG_VIDEO or FILTER_FLAG_FILTER,
+      FILTER_EFFECT_NAME, 'SYNC', '胸揺れフタープラグイン',
+      EmptyProcVideo, nil);
   end;
-  Result := @Plugin;
+  Result := @GTable;
 end;
 
 end.

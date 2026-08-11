@@ -28,85 +28,42 @@ type
   end;
 
 var
-  DeformationTypeList: array[0..2] of TFILTER_ITEM_SELECT_ITEM = (
-    (Name: '外周固定'; Value: Ord(sdtFixedOuter)),
-    (Name: '外周可変'; Value: Ord(sdtVariableOuter)),
-    (Name: nil; Value: 0)
-  );
-  DeformationTypeItem: TFILTER_ITEM_SELECT = (
-    ItemType: 'select';
-    Name: '変形タイプ';
-    Value: Ord(sdtFixedOuter);
-    List: @DeformationTypeList[0]
-  );
-  TimeAxisEnabledItem: TFILTER_ITEM_CHECK = (
-    ItemType: 'check';
-    Name: '時間軸計算';
-    Value: 1
-  );
-  StrengthItem: TFILTER_ITEM_TRACK = (
-    ItemType: 'track';
-    Name: '揺れの強さ';
-    Value: 50.0;
-    S: 0.0;
-    E: 100.0;
-    Step: 1.0
-  );
-  DelayItem: TFILTER_ITEM_TRACK = (
-    ItemType: 'track';
-    Name: '動きの遅れ';
-    Value: 50.0;
-    S: 0.0;
-    E: 100.0;
-    Step: 1.0
-  );
-  SoftnessItem: TFILTER_ITEM_TRACK = (
-    ItemType: 'track';
-    Name: 'やわらかさ';
-    Value: 50.0;
-    S: 0.0;
-    E: 100.0;
-    Step: 1.0
-  );
-  DurationItem: TFILTER_ITEM_TRACK = (
-    ItemType: 'track';
-    Name: '揺れの長さ';
-    Value: 50.0;
-    S: 0.0;
-    E: 100.0;
-    Step: 1.0
-  );
-  MaximumDeformationItem: TFILTER_ITEM_TRACK = (
-    ItemType: 'track';
-    Name: '最大変形量';
-    Value: 50.0;
-    S: 0.0;
-    E: 100.0;
-    Step: 1.0
-  );
-  HorizontalInfluenceItem: TFILTER_ITEM_TRACK = (
-    ItemType: 'track';
-    Name: '横方向';
-    Value: 50.0;
-    S: 0.0;
-    E: 100.0;
-    Step: 1.0
-  );
-  VerticalInfluenceItem: TFILTER_ITEM_TRACK = (
-    ItemType: 'track';
-    Name: '縦方向';
-    Value: 50.0;
-    S: 0.0;
-    E: 100.0;
-    Step: 1.0
-  );
+  DeformationTypeList: array[0..2] of TFILTER_ITEM_SELECT_ITEM;
+  DeformationTypeItem: TFILTER_ITEM_SELECT;
+  TimeAxisEnabledItem: TFILTER_ITEM_CHECK;
+  StrengthItem: TFILTER_ITEM_TRACK;
+  DelayItem: TFILTER_ITEM_TRACK;
+  SoftnessItem: TFILTER_ITEM_TRACK;
+  DurationItem: TFILTER_ITEM_TRACK;
+  MaximumDeformationItem: TFILTER_ITEM_TRACK;
+  HorizontalInfluenceItem: TFILTER_ITEM_TRACK;
+  VerticalInfluenceItem: TFILTER_ITEM_TRACK;
 
+procedure AddShakeFilterItems;
 function CurrentShakeRuntimeSettings: TShakeRuntimeSettings;
 
 implementation
 
 uses
-  System.Math;
+  System.Math,
+  PluginFilterTable;
+
+procedure AddShakeFilterItems;
+begin
+  ClearSelectList;
+  AddSelectList(DeformationTypeList, '外周固定', Ord(sdtFixedOuter));
+  AddSelectList(DeformationTypeList, '外周可変', Ord(sdtVariableOuter));
+  AddSelect(DeformationTypeItem, '変形タイプ', Ord(sdtFixedOuter),
+    @DeformationTypeList[0]);
+  AddCheck(TimeAxisEnabledItem, '時間軸計算', 1);
+  AddTrack(StrengthItem, '揺れの強さ', 50.0, 0.0, 100.0, 1.0);
+  AddTrack(DelayItem, '動きの遅れ', 50.0, 0.0, 100.0, 1.0);
+  AddTrack(SoftnessItem, 'やわらかさ', 50.0, 0.0, 100.0, 1.0);
+  AddTrack(DurationItem, '揺れの長さ', 50.0, 0.0, 100.0, 1.0);
+  AddTrack(MaximumDeformationItem, '最大変形量', 50.0, 0.0, 100.0, 1.0);
+  AddTrack(HorizontalInfluenceItem, '横方向', 50.0, 0.0, 100.0, 1.0);
+  AddTrack(VerticalInfluenceItem, '縦方向', 50.0, 0.0, 100.0, 1.0);
+end;
 
 function Percent(Value, Minimum, Maximum: Double): Double;
 begin
