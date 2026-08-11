@@ -26,6 +26,8 @@ type
     destructor Destroy; override;
     function AddVertex(const Position: TPointF;
       Kind: TShakeVertexKind): Integer;
+    function InsertVertex(Index: Integer; const Position: TPointF;
+      Kind: TShakeVertexKind): Integer;
     procedure Assign(Source: TShakeCurve);
     procedure Clear;
     procedure DeleteVertex(Index: Integer);
@@ -48,6 +50,9 @@ type
 
 implementation
 
+uses
+  System.Math;
+
 constructor TShakeCurve.Create;
 begin
   inherited Create;
@@ -68,6 +73,17 @@ begin
   Vertex.Position := Position;
   Vertex.Kind := Kind;
   Result := FVertices.Add(Vertex);
+end;
+
+function TShakeCurve.InsertVertex(Index: Integer; const Position: TPointF;
+  Kind: TShakeVertexKind): Integer;
+var
+  Vertex: TShakeCurveVertex;
+begin
+  Result := EnsureRange(Index, 0, FVertices.Count);
+  Vertex.Position := Position;
+  Vertex.Kind := Kind;
+  FVertices.Insert(Result, Vertex);
 end;
 
 procedure TShakeCurve.Assign(Source: TShakeCurve);

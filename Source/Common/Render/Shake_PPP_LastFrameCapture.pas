@@ -42,6 +42,12 @@ var
   CaptureStatus: string;
   CaptureWidth: Integer;
   LoggedCaptureSignature: string;
+{$IFDEF DEBUG}
+  CapturePerfCount: Integer;
+  CapturePerfLastLogTick: UInt64;
+  CapturePerfMaximumMilliseconds: Double;
+  CapturePerfTotalMilliseconds: Double;
+{$ENDIF}
 
 function BytesPerPixel(Format: DXGI_FORMAT): Integer;
 begin
@@ -130,6 +136,12 @@ begin
   CaptureHeight := 0;
   CaptureStatus := 'No framebuffer has been captured.';
   LoggedCaptureSignature := '';
+{$IFDEF DEBUG}
+  CapturePerfCount := 0;
+  CapturePerfLastLogTick := 0;
+  CapturePerfMaximumMilliseconds := 0;
+  CapturePerfTotalMilliseconds := 0;
+{$ENDIF}
   CaptureInitialized := True;
   DebugLog('Frame capture initialized.');
 end;
@@ -172,10 +184,18 @@ var
   Width: Integer;
   Y: Integer;
   CaptureSignature: string;
+{$IFDEF DEBUG}
+  CaptureElapsedMilliseconds: Double;
+  CapturePerfStarted: Int64;
+  CurrentTick: UInt64;
+{$ENDIF}
 begin
   if not CaptureInitialized then
     Exit;
 
+{$IFDEF DEBUG}
+  CapturePerfStarted := DebugTimerStart;
+{$ENDIF}
   EnterCriticalSection(CaptureLock);
   try
     try
@@ -309,6 +329,31 @@ begin
         SetCaptureError('Framebuffer capture failed: ' + E.Message);
     end;
   finally
+{$IFDEF DEBUG}
+    CaptureElapsedMilliseconds :=
+      DebugTimerElapsedMilliseconds(CapturePerfStarted);
+    Inc(CapturePerfCount);
+    CapturePerfTotalMilliseconds := CapturePerfTotalMilliseconds +
+      CaptureElapsedMilliseconds;
+    CapturePerfMaximumMilliseconds := Max(CapturePerfMaximumMilliseconds,
+      CaptureElapsedMilliseconds);
+    CurrentTick := GetTickCount64;
+    if CapturePerfLastLogTick = 0 then
+      CapturePerfLastLogTick := CurrentTick
+    else if CurrentTick - CapturePerfLastLogTick >= 1000 then
+    begin
+      DebugLog(Format(
+        'Capture performance: calls=%d avgMs=%.3f maxMs=%.3f size=%dx%d format=%d.',
+        [CapturePerfCount,
+         CapturePerfTotalMilliseconds / CapturePerfCount,
+         CapturePerfMaximumMilliseconds, CaptureWidth, CaptureHeight,
+         Ord(CaptureFormat)]));
+      CapturePerfCount := 0;
+      CapturePerfTotalMilliseconds := 0;
+      CapturePerfMaximumMilliseconds := 0;
+      CapturePerfLastLogTick := CurrentTick;
+    end;
+{$ENDIF}
     LeaveCriticalSection(CaptureLock);
   end;
 end;

@@ -22,6 +22,8 @@ type
       SelectedVertex, PPI: Integer); static;
     class function HitTestClosingSegment(const Destination: TRect;
       Curve: TShakeCurve; X, Y, PPI: Integer): Boolean; static;
+    class function HitTestSegment(const Destination: TRect;
+      Curve: TShakeCurve; X, Y, PPI: Integer): Integer; static;
     class function HitTestVertex(const Destination: TRect; Curve: TShakeCurve;
       X, Y, PPI: Integer): Integer; static;
     class function ToCanvas(const Destination: TRect;
@@ -332,6 +334,73 @@ begin
     if DistanceSquared <= Radius * Radius then
       Exit(True);
     PreviousPoint := CurrentPoint;
+  end;
+end;
+
+class function TShakeCurveRenderer.HitTestSegment(const Destination: TRect;
+  Curve: TShakeCurve; X, Y, PPI: Integer): Integer;
+const
+  SAMPLE_COUNT = 32;
+var
+  ClosestX: Double;
+  ClosestY: Double;
+  Control1: TPointF;
+  Control2: TPointF;
+  CurrentPoint: TPoint;
+  DistanceSquared: Double;
+  I: Integer;
+  J: Integer;
+  LengthSquared: Double;
+  OneMinusT: Double;
+  Point0: TPointF;
+  Point3: TPointF;
+  PreviousPoint: TPoint;
+  Projection: Double;
+  Radius: Integer;
+  SegmentCount: Integer;
+  T: Double;
+  VectorX: Double;
+  VectorY: Double;
+  XValue: Double;
+  YValue: Double;
+begin
+  Result := -1;
+  if Curve.Count < 2 then
+    Exit;
+  SegmentCount := Curve.Count - 1;
+  if Curve.Closed and (Curve.Count >= 3) then
+    Inc(SegmentCount);
+  Radius := Max(6, MulDiv(8, PPI, 96));
+  for I := 0 to SegmentCount - 1 do
+  begin
+    ControlPoints(Curve, I, Point0, Control1, Control2, Point3);
+    PreviousPoint := ToCanvas(Destination, Point0);
+    for J := 1 to SAMPLE_COUNT do
+    begin
+      T := J / SAMPLE_COUNT;
+      OneMinusT := 1 - T;
+      XValue := Sqr(OneMinusT) * OneMinusT * Point0.X +
+        3 * Sqr(OneMinusT) * T * Control1.X +
+        3 * OneMinusT * Sqr(T) * Control2.X + Sqr(T) * T * Point3.X;
+      YValue := Sqr(OneMinusT) * OneMinusT * Point0.Y +
+        3 * Sqr(OneMinusT) * T * Control1.Y +
+        3 * OneMinusT * Sqr(T) * Control2.Y + Sqr(T) * T * Point3.Y;
+      CurrentPoint := ToCanvas(Destination, PointF(XValue, YValue));
+      VectorX := CurrentPoint.X - PreviousPoint.X;
+      VectorY := CurrentPoint.Y - PreviousPoint.Y;
+      LengthSquared := VectorX * VectorX + VectorY * VectorY;
+      if LengthSquared > 0 then
+        Projection := EnsureRange(((X - PreviousPoint.X) * VectorX +
+          (Y - PreviousPoint.Y) * VectorY) / LengthSquared, 0.0, 1.0)
+      else
+        Projection := 0;
+      ClosestX := PreviousPoint.X + Projection * VectorX;
+      ClosestY := PreviousPoint.Y + Projection * VectorY;
+      DistanceSquared := Sqr(X - ClosestX) + Sqr(Y - ClosestY);
+      if DistanceSquared <= Radius * Radius then
+        Exit(I);
+      PreviousPoint := CurrentPoint;
+    end;
   end;
 end;
 

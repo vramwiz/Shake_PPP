@@ -92,6 +92,7 @@ type
     procedure EnsureBackBuffer;
     procedure FitImage;
     function HitTestClosingSegment(X, Y: Integer): Boolean;
+    function HitTestSegment(X, Y: Integer): Integer;
     function HitTestVertex(X, Y: Integer): Integer;
     function NormalizedToCanvas(const Position: TPointF): TPoint;
     procedure MarkDeformationDirty;
@@ -163,6 +164,12 @@ function TFormShakeSettings.HitTestClosingSegment(X, Y: Integer): Boolean;
 begin
   Result := TShakeCurveRenderer.HitTestClosingSegment(
     BackgroundDestinationRect, ActiveCurve, X, Y, CurrentPPI);
+end;
+
+function TFormShakeSettings.HitTestSegment(X, Y: Integer): Integer;
+begin
+  Result := TShakeCurveRenderer.HitTestSegment(BackgroundDestinationRect,
+    ActiveCurve, X, Y, CurrentPPI);
 end;
 
 function TFormShakeSettings.BackgroundDestinationRect: TRect;
@@ -715,6 +722,7 @@ var
   Curve: TShakeCurve;
   HitIndex: Integer;
   Position: TPointF;
+  SegmentIndex: Integer;
 begin
   FRightDownOnClosingSegment := False;
   if FPanMode and (Button = mbLeft) then
@@ -756,7 +764,12 @@ begin
   begin
     if not CanvasToNormalized(X, Y, False, Position) then
       Exit;
-    HitIndex := Curve.AddVertex(Position, FCurrentVertexKind);
+    SegmentIndex := HitTestSegment(X, Y);
+    if SegmentIndex >= 0 then
+      HitIndex := Curve.InsertVertex(SegmentIndex + 1, Position,
+        FCurrentVertexKind)
+    else
+      HitIndex := Curve.AddVertex(Position, FCurrentVertexKind);
     MarkDeformationDirty;
   end;
   FSelectedVertex := HitIndex;
@@ -1021,7 +1034,7 @@ begin
       [FActiveCurveSetIndex + 1, CurveNames[FActiveCurveKind]])
   else
     StatusLabel.Caption := Format(
-      'セット%d・%s（%s）：左クリックで%s頂点を追加／頂点を右クリック削除／空所を右ドラッグ移動　頂点数 %d',
+      'セット%d・%s（%s）：左クリックで%s頂点を追加（線上では中間へ挿入）／頂点を右クリック削除／空所を右ドラッグ移動　頂点数 %d',
       [FActiveCurveSetIndex + 1, CurveNames[FActiveCurveKind], ClosedNames[ActiveCurve.Closed],
        VertexNames[FCurrentVertexKind], ActiveCurve.Count]);
 end;

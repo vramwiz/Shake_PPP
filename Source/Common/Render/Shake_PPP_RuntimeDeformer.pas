@@ -49,8 +49,26 @@ type
     FSource: TBytes;
     FWork: TBytes;
     FOutput: TBytes;
+{$IFDEF DEBUG}
+    FPerfBufferMilliseconds: Double;
+    FPerfDeformMilliseconds: array[0..SHAKE_CURVE_SET_COUNT - 1] of Double;
+    FPerfFrameCount: Integer;
+    FPerfGetImageMilliseconds: Double;
+    FPerfLastLogTick: UInt64;
+    FPerfMaximumTotalMilliseconds: Double;
+    FPerfSetImageMilliseconds: Double;
+    FPerfTotalMilliseconds: Double;
+    procedure RecordPerformance(Video: PFILTER_PROC_VIDEO;
+      BufferMilliseconds, GetImageMilliseconds: Double;
+      const DeformMilliseconds: array of Double;
+      SetImageMilliseconds, TotalMilliseconds: Double);
+{$ENDIF}
     procedure AdvanceMotion(Frame: Integer;
       const Settings: TShakeRuntimeSettings);
+    procedure ApplyDeformation(Video: PFILTER_PROC_VIDEO;
+      const CurveDataText: string; Width, Height: Integer;
+      DisplacementX, DisplacementY: Double;
+      DeformationType: TShakeDeformationType);
     function PrepareMaps(Width, Height: Integer;
       const CurveDataText: string): Boolean;
     procedure ResetMotion(Frame: Integer; PositionX, PositionY: Double);
@@ -65,6 +83,13 @@ var
   RuntimeInitialized: Boolean;
   RuntimeLock: TRTLCriticalSection;
   RuntimeStates: TObjectDictionary<Int64, TShakeObjectState>;
+{$IFDEF DEBUG}
+  RuntimePerfCallCount: Integer;
+  RuntimePerfLastLogTick: UInt64;
+  RuntimePerfLockWaitMilliseconds: Double;
+  RuntimePerfMaximumMilliseconds: Double;
+  RuntimePerfTotalMilliseconds: Double;
+{$ENDIF}
 
 constructor TShakeObjectState.Create;
 var
@@ -91,6 +116,60 @@ begin
   end;
   inherited;
 end;
+
+{$IFDEF DEBUG}
+procedure TShakeObjectState.RecordPerformance(Video: PFILTER_PROC_VIDEO;
+  BufferMilliseconds, GetImageMilliseconds: Double;
+  const DeformMilliseconds: array of Double;
+  SetImageMilliseconds, TotalMilliseconds: Double);
+var
+  CurrentTick: UInt64;
+  I: Integer;
+begin
+  Inc(FPerfFrameCount);
+  FPerfBufferMilliseconds := FPerfBufferMilliseconds + BufferMilliseconds;
+  FPerfGetImageMilliseconds := FPerfGetImageMilliseconds +
+    GetImageMilliseconds;
+  for I := 0 to Min(High(DeformMilliseconds),
+    SHAKE_CURVE_SET_COUNT - 1) do
+    FPerfDeformMilliseconds[I] := FPerfDeformMilliseconds[I] +
+      DeformMilliseconds[I];
+  FPerfSetImageMilliseconds := FPerfSetImageMilliseconds +
+    SetImageMilliseconds;
+  FPerfTotalMilliseconds := FPerfTotalMilliseconds + TotalMilliseconds;
+  FPerfMaximumTotalMilliseconds := Max(FPerfMaximumTotalMilliseconds,
+    TotalMilliseconds);
+
+  CurrentTick := GetTickCount64;
+  if FPerfLastLogTick = 0 then
+  begin
+    FPerfLastLogTick := CurrentTick;
+    Exit;
+  end;
+  if CurrentTick - FPerfLastLogTick < 1000 then
+    Exit;
+
+  DebugLog(Format(
+    'Runtime performance: objectId=%d effectId=%d frames=%d size=%dx%d avgMs(total=%.3f buffer=%.3f getImage=%.3f deform1=%.3f deform2=%.3f setImage=%.3f) maxTotalMs=%.3f.',
+    [Video^.Object_^.ID, Video^.Object_^.EffectID, FPerfFrameCount,
+     FWidth, FHeight, FPerfTotalMilliseconds / FPerfFrameCount,
+     FPerfBufferMilliseconds / FPerfFrameCount,
+     FPerfGetImageMilliseconds / FPerfFrameCount,
+     FPerfDeformMilliseconds[0] / FPerfFrameCount,
+     FPerfDeformMilliseconds[1] / FPerfFrameCount,
+     FPerfSetImageMilliseconds / FPerfFrameCount,
+     FPerfMaximumTotalMilliseconds]));
+  FPerfFrameCount := 0;
+  FPerfBufferMilliseconds := 0;
+  FPerfGetImageMilliseconds := 0;
+  for I := 0 to SHAKE_CURVE_SET_COUNT - 1 do
+    FPerfDeformMilliseconds[I] := 0;
+  FPerfSetImageMilliseconds := 0;
+  FPerfTotalMilliseconds := 0;
+  FPerfMaximumTotalMilliseconds := 0;
+  FPerfLastLogTick := CurrentTick;
+end;
+{$ENDIF}
 
 procedure TShakeObjectState.ResetMotion(Frame: Integer;
   PositionX, PositionY: Double);
@@ -225,20 +304,109 @@ begin
   Result := FMapReady[0] or FMapReady[1];
 end;
 
-procedure TShakeObjectState.Apply(Video: PFILTER_PROC_VIDEO;
-  const CurveDataText: string; const Settings: TShakeRuntimeSettings);
+procedure TShakeObjectState.ApplyDeformation(
+  Video: PFILTER_PROC_VIDEO; const CurveDataText: string;
+  Width, Height: Integer; DisplacementX, DisplacementY: Double;
+  DeformationType: TShakeDeformationType);
 var
   ByteCount: NativeInt;
   CurrentSource: Pointer;
   ErrorText: string;
-  Frame: Integer;
-  Height: Integer;
   I: Integer;
   LastReadySet: Integer;
   NextDestination: Pointer;
-  Width: Integer;
+  Succeeded: Boolean;
+{$IFDEF DEBUG}
+  BufferMilliseconds: Double;
+  DeformMilliseconds: array[0..SHAKE_CURVE_SET_COUNT - 1] of Double;
+  GetImageMilliseconds: Double;
+  PerfStageStarted: Int64;
+  PerfTotalStarted: Int64;
+  SetImageMilliseconds: Double;
+  TotalMilliseconds: Double;
+{$ENDIF}
+begin
+  if not PrepareMaps(Width, Height, CurveDataText) then
+    Exit;
+{$IFDEF DEBUG}
+  PerfTotalStarted := DebugTimerStart;
+  PerfStageStarted := DebugTimerStart;
+  for I := 0 to SHAKE_CURVE_SET_COUNT - 1 do
+    DeformMilliseconds[I] := 0;
+{$ENDIF}
+  ByteCount := NativeInt(Width) * Height * 4;
+  SetLength(FSource, ByteCount);
+  SetLength(FWork, ByteCount);
+  SetLength(FOutput, ByteCount);
+{$IFDEF DEBUG}
+  BufferMilliseconds := DebugTimerElapsedMilliseconds(PerfStageStarted);
+  PerfStageStarted := DebugTimerStart;
+{$ENDIF}
+  Video^.GetImageData(PPIXEL_RGBA(@FSource[0]));
+{$IFDEF DEBUG}
+  GetImageMilliseconds := DebugTimerElapsedMilliseconds(PerfStageStarted);
+{$ENDIF}
+  CurrentSource := @FSource[0];
+  LastReadySet := -1;
+  for I := SHAKE_CURVE_SET_COUNT - 1 downto 0 do
+    if FMapReady[I] then
+    begin
+      LastReadySet := I;
+      Break;
+    end;
+  for I := 0 to SHAKE_CURVE_SET_COUNT - 1 do
+    if FMapReady[I] then
+    begin
+      if I = LastReadySet then
+        NextDestination := @FOutput[0]
+      else
+        NextDestination := @FWork[0];
+{$IFDEF DEBUG}
+      PerfStageStarted := DebugTimerStart;
+{$ENDIF}
+      case DeformationType of
+        sdtFixedOuter:
+          Succeeded := FMaps[I].ApplyRgba(CurrentSource, NextDestination,
+            DisplacementX, DisplacementY, ErrorText);
+        sdtVariableOuter:
+          Succeeded := FMaps[I].ApplyVariableOuterRgba(CurrentSource,
+            NextDestination, DisplacementX, DisplacementY, ErrorText);
+      else
+        Succeeded := False;
+        ErrorText := 'UNKNOWN_DEFORMATION_TYPE';
+      end;
+      if not Succeeded then
+      begin
+        DebugLog(Format('Runtime deformation set %d failed: %s.',
+          [I + 1, ErrorText]));
+        Exit;
+      end;
+{$IFDEF DEBUG}
+      DeformMilliseconds[I] :=
+        DebugTimerElapsedMilliseconds(PerfStageStarted);
+{$ENDIF}
+      CurrentSource := NextDestination;
+    end;
+{$IFDEF DEBUG}
+  PerfStageStarted := DebugTimerStart;
+{$ENDIF}
+  Video^.SetImageData(PPIXEL_RGBA(@FOutput[0]), Width, Height);
+{$IFDEF DEBUG}
+  SetImageMilliseconds := DebugTimerElapsedMilliseconds(PerfStageStarted);
+  TotalMilliseconds := DebugTimerElapsedMilliseconds(PerfTotalStarted);
+  RecordPerformance(Video, BufferMilliseconds, GetImageMilliseconds,
+    DeformMilliseconds, SetImageMilliseconds, TotalMilliseconds);
+{$ENDIF}
+end;
+
+procedure TShakeObjectState.Apply(Video: PFILTER_PROC_VIDEO;
+  const CurveDataText: string; const Settings: TShakeRuntimeSettings);
+var
   DisplacementX: Double;
   DisplacementY: Double;
+  Frame: Integer;
+  Height: Integer;
+  Width: Integer;
 begin
   if (Video = nil) or (Video^.Object_ = nil) or
     not Assigned(Video^.GetImageData) or
@@ -257,9 +425,6 @@ begin
     Exit;
   end;
   AdvanceMotion(Frame, Settings);
-  if not PrepareMaps(Width, Height, CurveDataText) then
-    Exit;
-
   DisplacementX := EnsureRange(FOffsetX * Settings.HorizontalInfluence,
     -Settings.MaximumDeformation, Settings.MaximumDeformation);
   DisplacementY := EnsureRange(FOffsetY * Settings.VerticalInfluence,
@@ -268,36 +433,11 @@ begin
     SameValue(DisplacementY, 0, 0.005) then
     Exit;
 
-  ByteCount := NativeInt(Width) * Height * 4;
-  SetLength(FSource, ByteCount);
-  SetLength(FWork, ByteCount);
-  SetLength(FOutput, ByteCount);
-  Video^.GetImageData(PPIXEL_RGBA(@FSource[0]));
-  CurrentSource := @FSource[0];
-  LastReadySet := -1;
-  for I := SHAKE_CURVE_SET_COUNT - 1 downto 0 do
-    if FMapReady[I] then
-    begin
-      LastReadySet := I;
-      Break;
-    end;
-  for I := 0 to SHAKE_CURVE_SET_COUNT - 1 do
-    if FMapReady[I] then
-    begin
-      if I = LastReadySet then
-        NextDestination := @FOutput[0]
-      else
-        NextDestination := @FWork[0];
-      if not FMaps[I].ApplyRgba(CurrentSource, NextDestination,
-        DisplacementX, DisplacementY, ErrorText) then
-      begin
-        DebugLog(Format('Runtime deformation set %d failed: %s.',
-          [I + 1, ErrorText]));
-        Exit;
-      end;
-      CurrentSource := NextDestination;
-    end;
-  Video^.SetImageData(PPIXEL_RGBA(@FOutput[0]), Width, Height);
+  case Settings.DeformationType of
+    sdtFixedOuter, sdtVariableOuter:
+      ApplyDeformation(Video, CurveDataText, Width, Height,
+        DisplacementX, DisplacementY, Settings.DeformationType);
+  end;
 end;
 
 procedure InitializeRuntimeDeformer;
@@ -307,6 +447,13 @@ begin
   InitializeCriticalSection(RuntimeLock);
   RuntimeStates := TObjectDictionary<Int64, TShakeObjectState>.Create(
     [doOwnsValues]);
+{$IFDEF DEBUG}
+  RuntimePerfCallCount := 0;
+  RuntimePerfLastLogTick := 0;
+  RuntimePerfLockWaitMilliseconds := 0;
+  RuntimePerfMaximumMilliseconds := 0;
+  RuntimePerfTotalMilliseconds := 0;
+{$ENDIF}
   RuntimeInitialized := True;
 end;
 
@@ -329,13 +476,25 @@ procedure ApplyRuntimeDeformation(Video: PFILTER_PROC_VIDEO;
 var
   Key: Int64;
   State: TShakeObjectState;
+{$IFDEF DEBUG}
+  CurrentTick: UInt64;
+  DispatchMilliseconds: Double;
+  DispatchStarted: Int64;
+  LockWaitMilliseconds: Double;
+{$ENDIF}
 begin
   if not RuntimeInitialized or (Video = nil) or (Video^.Object_ = nil) then
     Exit;
   Key := Video^.Object_^.EffectID;
   if Key = 0 then
     Key := Video^.Object_^.ID;
+{$IFDEF DEBUG}
+  DispatchStarted := DebugTimerStart;
+{$ENDIF}
   EnterCriticalSection(RuntimeLock);
+{$IFDEF DEBUG}
+  LockWaitMilliseconds := DebugTimerElapsedMilliseconds(DispatchStarted);
+{$ENDIF}
   try
     if not RuntimeStates.TryGetValue(Key, State) then
     begin
@@ -344,6 +503,33 @@ begin
     end;
     State.Apply(Video, CurveDataText, Settings);
   finally
+{$IFDEF DEBUG}
+    DispatchMilliseconds := DebugTimerElapsedMilliseconds(DispatchStarted);
+    Inc(RuntimePerfCallCount);
+    RuntimePerfLockWaitMilliseconds := RuntimePerfLockWaitMilliseconds +
+      LockWaitMilliseconds;
+    RuntimePerfTotalMilliseconds := RuntimePerfTotalMilliseconds +
+      DispatchMilliseconds;
+    RuntimePerfMaximumMilliseconds := Max(RuntimePerfMaximumMilliseconds,
+      DispatchMilliseconds);
+    CurrentTick := GetTickCount64;
+    if RuntimePerfLastLogTick = 0 then
+      RuntimePerfLastLogTick := CurrentTick
+    else if CurrentTick - RuntimePerfLastLogTick >= 1000 then
+    begin
+      DebugLog(Format(
+        'Runtime dispatch performance: calls=%d avgMs=%.3f avgLockWaitMs=%.3f maxMs=%.3f objects=%d.',
+        [RuntimePerfCallCount,
+         RuntimePerfTotalMilliseconds / RuntimePerfCallCount,
+         RuntimePerfLockWaitMilliseconds / RuntimePerfCallCount,
+         RuntimePerfMaximumMilliseconds, RuntimeStates.Count]));
+      RuntimePerfCallCount := 0;
+      RuntimePerfLockWaitMilliseconds := 0;
+      RuntimePerfTotalMilliseconds := 0;
+      RuntimePerfMaximumMilliseconds := 0;
+      RuntimePerfLastLogTick := CurrentTick;
+    end;
+{$ENDIF}
     LeaveCriticalSection(RuntimeLock);
   end;
 end;

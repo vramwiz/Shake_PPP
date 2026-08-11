@@ -6,6 +6,8 @@ interface
 
 procedure ResetDebugLog;
 procedure DebugLog(const MessageText: string);
+function DebugTimerStart: Int64;
+function DebugTimerElapsedMilliseconds(StartCounter: Int64): Double;
 
 implementation
 
@@ -23,6 +25,23 @@ const
 
 var
   DebugLogLock: TRTLCriticalSection;
+  DebugTimerFrequency: Int64;
+
+function DebugTimerStart: Int64;
+begin
+  QueryPerformanceCounter(Result);
+end;
+
+function DebugTimerElapsedMilliseconds(StartCounter: Int64): Double;
+var
+  CurrentCounter: Int64;
+begin
+  QueryPerformanceCounter(CurrentCounter);
+  if DebugTimerFrequency > 0 then
+    Result := (CurrentCounter - StartCounter) * 1000.0 / DebugTimerFrequency
+  else
+    Result := 0;
+end;
 
 procedure DebugLog(const MessageText: string);
 var
@@ -60,11 +79,22 @@ end;
 
 initialization
   InitializeCriticalSection(DebugLogLock);
+  QueryPerformanceFrequency(DebugTimerFrequency);
 
 finalization
   DeleteCriticalSection(DebugLogLock);
 
 {$ELSE}
+
+function DebugTimerStart: Int64;
+begin
+  Result := 0;
+end;
+
+function DebugTimerElapsedMilliseconds(StartCounter: Int64): Double;
+begin
+  Result := 0;
+end;
 
 procedure DebugLog(const MessageText: string);
 begin

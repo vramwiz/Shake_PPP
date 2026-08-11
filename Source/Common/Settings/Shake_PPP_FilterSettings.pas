@@ -8,7 +8,13 @@ uses
   AviUtl2FilterTypes;
 
 type
+  TShakeDeformationType = (
+    sdtFixedOuter = 0,
+    sdtVariableOuter = 1
+  );
+
   TShakeRuntimeSettings = record
+    DeformationType: TShakeDeformationType;
     TimeAxisEnabled: Boolean;
     PositionX: Double;
     PositionY: Double;
@@ -22,33 +28,28 @@ type
   end;
 
 var
+  DeformationTypeList: array[0..2] of TFILTER_ITEM_SELECT_ITEM = (
+    (Name: '外周固定'; Value: Ord(sdtFixedOuter)),
+    (Name: '外周可変'; Value: Ord(sdtVariableOuter)),
+    (Name: nil; Value: 0)
+  );
+  DeformationTypeItem: TFILTER_ITEM_SELECT = (
+    ItemType: 'select';
+    Name: '変形タイプ';
+    Value: Ord(sdtFixedOuter);
+    List: @DeformationTypeList[0]
+  );
   TimeAxisEnabledItem: TFILTER_ITEM_CHECK = (
     ItemType: 'check';
     Name: '時間軸計算';
     Value: 1
   );
-  PositionXItem: TFILTER_ITEM_TRACK = (
-    ItemType: 'track';
-    Name: '移動X';
-    Value: 0.0;
-    S: -10000.0;
-    E: 10000.0;
-    Step: 0.1
-  );
-  PositionYItem: TFILTER_ITEM_TRACK = (
-    ItemType: 'track';
-    Name: '移動Y';
-    Value: 0.0;
-    S: -10000.0;
-    E: 10000.0;
-    Step: 0.1
-  );
   StrengthItem: TFILTER_ITEM_TRACK = (
     ItemType: 'track';
     Name: '揺れの強さ';
-    Value: 100.0;
+    Value: 50.0;
     S: 0.0;
-    E: 200.0;
+    E: 100.0;
     Step: 1.0
   );
   DelayItem: TFILTER_ITEM_TRACK = (
@@ -78,25 +79,25 @@ var
   MaximumDeformationItem: TFILTER_ITEM_TRACK = (
     ItemType: 'track';
     Name: '最大変形量';
-    Value: 100.0;
+    Value: 50.0;
     S: 0.0;
-    E: 500.0;
+    E: 100.0;
     Step: 1.0
   );
   HorizontalInfluenceItem: TFILTER_ITEM_TRACK = (
     ItemType: 'track';
     Name: '横方向';
-    Value: 100.0;
+    Value: 50.0;
     S: 0.0;
-    E: 200.0;
+    E: 100.0;
     Step: 1.0
   );
   VerticalInfluenceItem: TFILTER_ITEM_TRACK = (
     ItemType: 'track';
     Name: '縦方向';
-    Value: 100.0;
+    Value: 50.0;
     S: 0.0;
-    E: 200.0;
+    E: 100.0;
     Step: 1.0
   );
 
@@ -114,19 +115,22 @@ end;
 
 function CurrentShakeRuntimeSettings: TShakeRuntimeSettings;
 begin
+  Result.DeformationType := TShakeDeformationType(EnsureRange(
+    DeformationTypeItem.Value, Ord(Low(TShakeDeformationType)),
+    Ord(High(TShakeDeformationType))));
   Result.TimeAxisEnabled := TimeAxisEnabledItem.Value <> 0;
-  Result.PositionX := PositionXItem.Value;
-  Result.PositionY := PositionYItem.Value;
-  Result.Strength := Percent(StrengthItem.Value, 0, 200);
+  Result.PositionX := 0;
+  Result.PositionY := 0;
+  Result.Strength := Percent(StrengthItem.Value, 0, 100);
   Result.Delay := Percent(DelayItem.Value, 0, 100);
   Result.Softness := Percent(SoftnessItem.Value, 0, 100);
   Result.Duration := Percent(DurationItem.Value, 0, 100);
   Result.MaximumDeformation := EnsureRange(MaximumDeformationItem.Value,
-    0.0, 500.0);
+    0.0, 100.0);
   Result.HorizontalInfluence := Percent(HorizontalInfluenceItem.Value,
-    0, 200);
+    0, 100);
   Result.VerticalInfluence := Percent(VerticalInfluenceItem.Value,
-    0, 200);
+    0, 100);
 end;
 
 end.

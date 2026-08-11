@@ -9,6 +9,10 @@ uses
 type
   TShakeDeformationMap = class
   private
+    FActiveBottom: Integer;
+    FActiveLeft: Integer;
+    FActiveRight: Integer;
+    FActiveTop: Integer;
     FHeight: Integer;
     FLastTimingLog: UInt64;
     FWeights: TArray<Single>;
@@ -21,6 +25,9 @@ type
       DisplacementX, DisplacementY: Double;
       out ErrorText: string): Boolean;
     function ApplyRgba(Source, Destination: Pointer;
+      DisplacementX, DisplacementY: Double;
+      out ErrorText: string): Boolean;
+    function ApplyVariableOuterRgba(Source, Destination: Pointer;
       DisplacementX, DisplacementY: Double;
       out ErrorText: string): Boolean;
     property Height: Integer read FHeight;
@@ -50,6 +57,7 @@ uses
 const
   CURVE_SAMPLES_PER_SEGMENT = 12;
   MASK_GRID_SIZE = 4;
+  VARIABLE_OUTER_MOTION_RATIO = 0.35;
 
 type
   TDoubleArray = array of Double;
@@ -270,6 +278,10 @@ begin
   FWeights := nil;
   FWidth := 0;
   FHeight := 0;
+  FActiveLeft := 0;
+  FActiveTop := 0;
+  FActiveRight := -1;
+  FActiveBottom := -1;
   FLastTimingLog := 0;
 end;
 
@@ -287,13 +299,13 @@ var
   NormalizedX: Double;
   NormalizedY: Double;
   OuterPolygon: TArray<TPointF>;
-{$IFDEF DEBUG}
   AffectedBottom: Integer;
-  AffectedCount: NativeInt;
   AffectedLeft: Integer;
   AffectedRight: Integer;
   AffectedTop: Integer;
   ScreenY: Integer;
+{$IFDEF DEBUG}
+  AffectedCount: NativeInt;
   StartedAt: UInt64;
 {$ENDIF}
   X: Integer;
@@ -327,16 +339,16 @@ begin
   GridWidth := (Width + MASK_GRID_SIZE - 1) div MASK_GRID_SIZE + 1;
   GridHeight := (Height + MASK_GRID_SIZE - 1) div MASK_GRID_SIZE + 1;
   SetLength(Mask, GridWidth * GridHeight);
+  AffectedLeft := Width;
+  AffectedTop := Height;
+  AffectedRight := -1;
+  AffectedBottom := -1;
 {$IFDEF DEBUG}
   StartedAt := GetTickCount64;
   DebugLogCurveCoordinates('outer', OuterContour, OuterPolygon,
     Width, Height);
   DebugLogCurveCoordinates('center', CenterContour, CenterPolygon,
     Width, Height);
-  AffectedLeft := Width;
-  AffectedTop := Height;
-  AffectedRight := -1;
-  AffectedBottom := -1;
   AffectedCount := 0;
 {$ENDIF}
   for GridY := 0 to GridHeight - 1 do
@@ -361,7 +373,6 @@ begin
           Weight := 0;
       end;
       FWeights[Y * FWidth + X] := Weight;
-{$IFDEF DEBUG}
       if Weight > 0 then
       begin
         ScreenY := FHeight - 1 - Y;
@@ -369,10 +380,15 @@ begin
         AffectedTop := Min(AffectedTop, ScreenY);
         AffectedRight := Max(AffectedRight, X);
         AffectedBottom := Max(AffectedBottom, ScreenY);
+{$IFDEF DEBUG}
         Inc(AffectedCount);
-      end;
 {$ENDIF}
+      end;
     end;
+  FActiveLeft := AffectedLeft;
+  FActiveTop := AffectedTop;
+  FActiveRight := AffectedRight;
+  FActiveBottom := AffectedBottom;
 {$IFDEF DEBUG}
   if AffectedCount > 0 then
     Shake_PPP_DebugLog.DebugLog(Format(
@@ -395,6 +411,7 @@ function TShakeDeformationMap.Apply(Source,
   DisplacementX, DisplacementY: Double;
   out ErrorText: string): Boolean;
 var
+  BlendWeight: Double;
   Channel: Integer;
   DestinationRows: TBitmapRows;
   DestinationRow: PByteRow;
@@ -434,22 +451,24 @@ begin
   Destination.SetSize(Source.Width, Source.Height);
   SetLength(SourceRows, Source.Height);
   SetLength(DestinationRows, Destination.Height);
-  for Y := 0 to Source.Height - 1 do
-  begin
-    SourceRows[Y] := Source.ScanLine[Y];
-    DestinationRows[Y] := Destination.ScanLine[Y];
-  end;
 {$IFDEF DEBUG}
   StartedAt := GetTickCount64;
 {$ENDIF}
   for Y := 0 to Source.Height - 1 do
   begin
+    SourceRows[Y] := Source.ScanLine[Y];
+    DestinationRows[Y] := Destination.ScanLine[Y];
+    Move(SourceRows[Y]^, DestinationRows[Y]^, NativeInt(Source.Width) * 4);
+  end;
+  for Y := FActiveTop to FActiveBottom do
+  begin
     DestinationRow := PByteRow(DestinationRows[Y]);
     // Use the same top-origin curve coordinate space as the AviUtl2 output.
     WeightY := FHeight - 1 - Y;
-    for X := 0 to Source.Width - 1 do
+    for X := FActiveLeft to FActiveRight do
     begin
       Weight := FWeights[WeightY * FWidth + X];
+      BlendWeight := Weight * Weight;
       SourceX := EnsureRange(X - DisplacementX * Weight,
         0.0, Source.Width - 1.0);
       SourceY := EnsureRange(Y - DisplacementY * Weight,
@@ -470,6 +489,8 @@ begin
           Row0[PixelOffset1 + Channel] * FX) * (1 - FY) +
           (Row1[PixelOffset0 + Channel] * (1 - FX) +
           Row1[PixelOffset1 + Channel] * FX) * FY;
+        Value := PByteRow(SourceRows[Y])^[X * 4 + Channel] *
+          (1 - BlendWeight) + Value * BlendWeight;
         DestinationRow[X * 4 + Channel] :=
           EnsureRange(Round(Value), 0, 255);
       end;
@@ -496,6 +517,7 @@ type
   PRgbaBytes = ^TRgbaBytes;
   TRgbaBytes = array[0..268435455] of Byte;
 var
+  BlendWeight: Double;
   Channel: Integer;
   FX: Double;
   FY: Double;
@@ -505,6 +527,7 @@ var
   PixelOffset11: NativeInt;
   SourceBytes: PRgbaBytes;
   DestinationBytes: PRgbaBytes;
+  ByteCount: NativeInt;
   SourceX: Double;
   SourceY: Double;
   Value: Double;
@@ -527,14 +550,17 @@ begin
   end;
   SourceBytes := Source;
   DestinationBytes := Destination;
-  for Y := 0 to FHeight - 1 do
+  ByteCount := NativeInt(FWidth) * FHeight * 4;
+  Move(SourceBytes^, DestinationBytes^, ByteCount);
+  for Y := FActiveTop to FActiveBottom do
   begin
     // AviUtl2 RGBA rows are top-to-bottom, while FWeights follows the
     // bottom-to-top TBitmap scanline order used by the settings preview.
     WeightY := FHeight - 1 - Y;
-    for X := 0 to FWidth - 1 do
+    for X := FActiveLeft to FActiveRight do
     begin
       Weight := FWeights[WeightY * FWidth + X];
+      BlendWeight := Weight * Weight;
       SourceX := EnsureRange(X - DisplacementX * Weight,
         0.0, FWidth - 1.0);
       SourceY := EnsureRange(Y - DisplacementY * Weight,
@@ -555,11 +581,170 @@ begin
           SourceBytes^[PixelOffset01 + Channel] * FX) * (1 - FY) +
           (SourceBytes^[PixelOffset10 + Channel] * (1 - FX) +
           SourceBytes^[PixelOffset11 + Channel] * FX) * FY;
+        Value := SourceBytes^[(NativeInt(Y) * FWidth + X) * 4 + Channel] *
+          (1 - BlendWeight) + Value * BlendWeight;
         DestinationBytes^[(NativeInt(Y) * FWidth + X) * 4 + Channel] :=
           EnsureRange(Round(Value), 0, 255);
       end;
     end;
   end;
+  Result := True;
+end;
+
+function TShakeDeformationMap.ApplyVariableOuterRgba(Source,
+  Destination: Pointer; DisplacementX, DisplacementY: Double;
+  out ErrorText: string): Boolean;
+type
+  PRgbaBytes = ^TRgbaBytes;
+  TRgbaBytes = array[0..268435455] of Byte;
+var
+  AffectedBottom: Integer;
+  AffectedLeft: Integer;
+  AffectedRight: Integer;
+  AffectedTop: Integer;
+  BaseX: Double;
+  BaseY: Double;
+  ByteCount: NativeInt;
+  Channel: Integer;
+  Coverage: Double;
+  DestinationBytes: PRgbaBytes;
+  DestinationOffset: NativeInt;
+  FX: Double;
+  FY: Double;
+  InnerMotionRatio: Double;
+  PixelOffset00: NativeInt;
+  PixelOffset01: NativeInt;
+  PixelOffset10: NativeInt;
+  PixelOffset11: NativeInt;
+  SampleX: Double;
+  SampleY: Double;
+  ShiftX: Double;
+  ShiftY: Double;
+  SourceBytes: PRgbaBytes;
+  Value: Double;
+  Weight: Double;
+  WeightX0: Integer;
+  WeightX1: Integer;
+  WeightY0: Integer;
+  WeightY1: Integer;
+  X: Integer;
+  X0: Integer;
+  X1: Integer;
+  Y: Integer;
+  Y0: Integer;
+  Y1: Integer;
+
+  function MapWeight(ScreenX, ScreenY: Integer): Double;
+  begin
+    if (ScreenX < 0) or (ScreenX >= FWidth) or
+      (ScreenY < 0) or (ScreenY >= FHeight) then
+      Exit(0);
+    Result := FWeights[(FHeight - 1 - ScreenY) * FWidth + ScreenX];
+  end;
+
+  function SampleMap(MapX, MapY: Double; CoverageOnly: Boolean): Double;
+  var
+    W00: Double;
+    W01: Double;
+    W10: Double;
+    W11: Double;
+  begin
+    if (MapX < 0) or (MapX > FWidth - 1) or
+      (MapY < 0) or (MapY > FHeight - 1) then
+      Exit(0);
+    WeightX0 := Trunc(MapX);
+    WeightY0 := Trunc(MapY);
+    WeightX1 := Min(WeightX0 + 1, FWidth - 1);
+    WeightY1 := Min(WeightY0 + 1, FHeight - 1);
+    FX := MapX - WeightX0;
+    FY := MapY - WeightY0;
+    W00 := MapWeight(WeightX0, WeightY0);
+    W01 := MapWeight(WeightX1, WeightY0);
+    W10 := MapWeight(WeightX0, WeightY1);
+    W11 := MapWeight(WeightX1, WeightY1);
+    if CoverageOnly then
+    begin
+      W00 := Ord(W00 > 0);
+      W01 := Ord(W01 > 0);
+      W10 := Ord(W10 > 0);
+      W11 := Ord(W11 > 0);
+    end;
+    Result := (W00 * (1 - FX) + W01 * FX) * (1 - FY) +
+      (W10 * (1 - FX) + W11 * FX) * FY;
+  end;
+
+begin
+  Result := False;
+  ErrorText := '';
+  if (Source = nil) or (Destination = nil) or (FWidth <= 0) or
+    (FHeight <= 0) or (Length(FWeights) <> FWidth * FHeight) then
+  begin
+    ErrorText := 'MAP_NOT_READY';
+    Exit;
+  end;
+
+  SourceBytes := Source;
+  DestinationBytes := Destination;
+  ByteCount := NativeInt(FWidth) * FHeight * 4;
+  Move(SourceBytes^, DestinationBytes^, ByteCount);
+  if (FActiveRight < FActiveLeft) or (FActiveBottom < FActiveTop) then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  ShiftX := DisplacementX * VARIABLE_OUTER_MOTION_RATIO;
+  ShiftY := DisplacementY * VARIABLE_OUTER_MOTION_RATIO;
+  InnerMotionRatio := 1 - VARIABLE_OUTER_MOTION_RATIO;
+  AffectedLeft := EnsureRange(FActiveLeft + Floor(Min(0.0, ShiftX)),
+    0, FWidth - 1);
+  AffectedTop := EnsureRange(FActiveTop + Floor(Min(0.0, ShiftY)),
+    0, FHeight - 1);
+  AffectedRight := EnsureRange(FActiveRight + Ceil(Max(0.0, ShiftX)),
+    0, FWidth - 1);
+  AffectedBottom := EnsureRange(FActiveBottom + Ceil(Max(0.0, ShiftY)),
+    0, FHeight - 1);
+
+  // Evaluate the mask in a coordinate system translated by the outer-edge
+  // motion. The remaining displacement grows smoothly toward the center.
+  for Y := AffectedTop to AffectedBottom do
+    for X := AffectedLeft to AffectedRight do
+    begin
+      BaseX := X - ShiftX;
+      BaseY := Y - ShiftY;
+      Weight := SampleMap(BaseX, BaseY, False);
+      Coverage := Max(SampleMap(X, Y, True),
+        SampleMap(BaseX, BaseY, True));
+      if Coverage <= 0 then
+        Continue;
+
+      SampleX := EnsureRange(BaseX - DisplacementX *
+        InnerMotionRatio * Weight, 0.0, FWidth - 1.0);
+      SampleY := EnsureRange(BaseY - DisplacementY *
+        InnerMotionRatio * Weight, 0.0, FHeight - 1.0);
+      X0 := Trunc(SampleX);
+      Y0 := Trunc(SampleY);
+      X1 := Min(X0 + 1, FWidth - 1);
+      Y1 := Min(Y0 + 1, FHeight - 1);
+      FX := SampleX - X0;
+      FY := SampleY - Y0;
+      PixelOffset00 := (NativeInt(Y0) * FWidth + X0) * 4;
+      PixelOffset01 := (NativeInt(Y0) * FWidth + X1) * 4;
+      PixelOffset10 := (NativeInt(Y1) * FWidth + X0) * 4;
+      PixelOffset11 := (NativeInt(Y1) * FWidth + X1) * 4;
+      DestinationOffset := (NativeInt(Y) * FWidth + X) * 4;
+      for Channel := 0 to 3 do
+      begin
+        Value := (SourceBytes^[PixelOffset00 + Channel] * (1 - FX) +
+          SourceBytes^[PixelOffset01 + Channel] * FX) * (1 - FY) +
+          (SourceBytes^[PixelOffset10 + Channel] * (1 - FX) +
+          SourceBytes^[PixelOffset11 + Channel] * FX) * FY;
+        Value := SourceBytes^[DestinationOffset + Channel] * (1 - Coverage) +
+          Value * Coverage;
+        DestinationBytes^[DestinationOffset + Channel] :=
+          EnsureRange(Round(Value), 0, 255);
+      end;
+    end;
   Result := True;
 end;
 

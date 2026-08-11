@@ -118,6 +118,18 @@ type
     Value: Byte;
   end;
 
+  PFILTER_ITEM_SELECT = ^TFILTER_ITEM_SELECT;
+  TFILTER_ITEM_SELECT_ITEM = record
+    Name: LPCWSTR;
+    Value: Integer;
+  end;
+  TFILTER_ITEM_SELECT = record
+    ItemType: LPCWSTR;
+    Name: LPCWSTR;
+    Value: Integer;
+    List: ^TFILTER_ITEM_SELECT_ITEM;
+  end;
+
   PFILTER_ITEM_BUTTON = ^TFILTER_ITEM_BUTTON;
   TFILTER_ITEM_BUTTON = record
     ItemType: LPCWSTR;

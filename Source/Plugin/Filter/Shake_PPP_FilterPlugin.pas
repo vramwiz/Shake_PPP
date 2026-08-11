@@ -33,6 +33,9 @@ var
     Name: '形状データ';
     Value: ''
   );
+{$IFDEF DEBUG}
+  LastRuntimeInputLogTick: UInt64;
+{$ENDIF}
 
 function TryUseObjectPosition(Video: PFILTER_PROC_VIDEO;
   var Settings: TShakeRuntimeSettings; out OutputParamX, OutputParamY,
@@ -68,34 +71,41 @@ end;
 procedure DebugLogRuntimeInput(Video: PFILTER_PROC_VIDEO;
   const Settings: TShakeRuntimeSettings; ObjectPositionUsed: Boolean;
   OutputParamX, OutputParamY, RelativeParamX, RelativeParamY: Double);
+{$IFDEF DEBUG}
 var
+  CurrentTick: UInt64;
   GetOutputFunctionAvailable: Boolean;
   RelativeParamAvailable: Boolean;
   PositionSource: string;
+{$ENDIF}
 begin
 {$IFDEF DEBUG}
+  CurrentTick := GetTickCount64;
+  if (LastRuntimeInputLogTick <> 0) and
+    (CurrentTick - LastRuntimeInputLogTick < 1000) then
+    Exit;
+  LastRuntimeInputLogTick := CurrentTick;
   GetOutputFunctionAvailable := (Video <> nil) and
     Assigned(Video^.GetOutputImageParam);
   RelativeParamAvailable := (Video <> nil) and (Video^.Param <> nil);
   if ObjectPositionUsed then
     PositionSource := 'object'
   else
-    PositionSource := 'manual-fallback';
+    PositionSource := 'unavailable';
   if (Video = nil) or (Video^.Object_ = nil) then
   begin
     DebugLog(Format(
-      'Runtime input received: object=nil getOutputFunction=%s getOutputSucceeded=%s relativeParamAvailable=%s timeAxisRaw=%d manualPosition=(%.6f,%.6f) positionSource=%s positionUsed=(%.6f,%.6f).',
+      'Runtime input received: object=nil getOutputFunction=%s getOutputSucceeded=%s relativeParamAvailable=%s timeAxisRaw=%d positionSource=%s positionUsed=(%.6f,%.6f).',
       [BoolToStr(GetOutputFunctionAvailable, True),
        BoolToStr(ObjectPositionUsed, True),
        BoolToStr(RelativeParamAvailable, True), TimeAxisEnabledItem.Value,
-       PositionXItem.Value, PositionYItem.Value,
        PositionSource,
        Settings.PositionX, Settings.PositionY]));
     Exit;
   end;
 
   DebugLog(Format(
-    'Runtime input received: objectId=%d effectId=%d layer=%d effectLayer=%d objectFlag=%d frame=%d frameRange=%d..%d time=%.6f getOutputFunction=%s getOutputSucceeded=%s relativeParamAvailable=%s timeAxisRaw=%d timeAxisUsed=%s manualPosition=(%.6f,%.6f) positionSource=%s outputPosition=(%.6f,%.6f) relativePosition=(%.6f,%.6f) positionUsed=(%.6f,%.6f).',
+    'Runtime input received: objectId=%d effectId=%d layer=%d effectLayer=%d objectFlag=%d frame=%d frameRange=%d..%d time=%.6f getOutputFunction=%s getOutputSucceeded=%s relativeParamAvailable=%s timeAxisRaw=%d timeAxisUsed=%s positionSource=%s outputPosition=(%.6f,%.6f) relativePosition=(%.6f,%.6f) positionUsed=(%.6f,%.6f).',
     [Video^.Object_^.ID, Video^.Object_^.EffectID,
      Video^.Object_^.Layer, Video^.Object_^.EffectLayer,
      Video^.Object_^.Flag,
@@ -105,7 +115,6 @@ begin
      BoolToStr(ObjectPositionUsed, True),
      BoolToStr(RelativeParamAvailable, True), TimeAxisEnabledItem.Value,
      BoolToStr(Settings.TimeAxisEnabled, True),
-     PositionXItem.Value, PositionYItem.Value,
      PositionSource,
      OutputParamX, OutputParamY, RelativeParamX, RelativeParamY,
      Settings.PositionX, Settings.PositionY]));
@@ -220,7 +229,7 @@ var
     Name: '設定';
     Callback: SettingsButtonCallback
   );
-  PluginItems: array[0..12] of Pointer;
+  PluginItems: array[0..11] of Pointer;
   Plugin: TFILTER_PLUGIN_TABLE = (
     Flag: FILTER_FLAG_VIDEO or FILTER_FLAG_FILTER;
     Name: '胸揺れ';
@@ -234,6 +243,9 @@ var
 function InitializeShakePlugin(Version: DWORD): Byte;
 begin
   ResetDebugLog;
+{$IFDEF DEBUG}
+  LastRuntimeInputLogTick := 0;
+{$ENDIF}
   DebugLog(Format('InitializePlugin version=%d.', [Version]));
   InitializeLastFrameCapture;
   InitializeRuntimeDeformer;
@@ -252,18 +264,17 @@ begin
   if Plugin.Items = nil then
   begin
     PluginItems[0] := @SettingsButton;
-    PluginItems[1] := @TimeAxisEnabledItem;
-    PluginItems[2] := @PositionXItem;
-    PluginItems[3] := @PositionYItem;
-    PluginItems[4] := @StrengthItem;
-    PluginItems[5] := @DelayItem;
-    PluginItems[6] := @SoftnessItem;
-    PluginItems[7] := @DurationItem;
-    PluginItems[8] := @MaximumDeformationItem;
-    PluginItems[9] := @HorizontalInfluenceItem;
-    PluginItems[10] := @VerticalInfluenceItem;
-    PluginItems[11] := @CurveDataItem;
-    PluginItems[12] := nil;
+    PluginItems[1] := @DeformationTypeItem;
+    PluginItems[2] := @TimeAxisEnabledItem;
+    PluginItems[3] := @StrengthItem;
+    PluginItems[4] := @DelayItem;
+    PluginItems[5] := @SoftnessItem;
+    PluginItems[6] := @DurationItem;
+    PluginItems[7] := @MaximumDeformationItem;
+    PluginItems[8] := @HorizontalInfluenceItem;
+    PluginItems[9] := @VerticalInfluenceItem;
+    PluginItems[10] := @CurveDataItem;
+    PluginItems[11] := nil;
     Plugin.Items := @PluginItems[0];
   end;
   Result := @Plugin;

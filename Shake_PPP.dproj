@@ -88,7 +88,7 @@
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
         <PostBuildEvent><![CDATA[copy /Y "C:\ProgramData\aviutl2\Plugin\Shake_PPP\$(PROJECTNAME).dll" "C:\ProgramData\aviutl2\Plugin\Shake_PPP\$(PROJECTNAME).auf2"&&if exist "C:\ProgramData\aviutl2\Plugin\Shake_PPP\$(PROJECTNAME).dll" del /Q "C:\ProgramData\aviutl2\Plugin\Shake_PPP\$(PROJECTNAME).dll"&&if exist "C:\ProgramData\aviutl2\Plugin\Shake_PPP\$(PROJECTNAME).rsm" del /Q "C:\ProgramData\aviutl2\Plugin\Shake_PPP\$(PROJECTNAME).rsm"]]></PostBuildEvent>
         <PostBuildEventIgnoreExitCode>False</PostBuildEventIgnoreExitCode>
-        <Debugger_HostApplication>D:\aviutl2_v2.1.0\aviutl2.exe</Debugger_HostApplication>
+        <Debugger_HostApplication>D:\aviutl2_v2.1.3a\aviutl2.exe</Debugger_HostApplication>
     </PropertyGroup>
     <ItemGroup>
         <DelphiCompile Include="$(MainSource)">
