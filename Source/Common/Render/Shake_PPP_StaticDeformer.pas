@@ -30,6 +30,13 @@ type
     function ApplyVariableOuterRgba(Source, Destination: Pointer;
       DisplacementX, DisplacementY: Double;
       out ErrorText: string): Boolean;
+    function WeightAtScreen(X, Y: Integer): Double;
+    procedure WeightAndGradientAtScreen(X, Y: Integer; out Weight,
+      GradientX, GradientY: Double);
+    property ActiveBottom: Integer read FActiveBottom;
+    property ActiveLeft: Integer read FActiveLeft;
+    property ActiveRight: Integer read FActiveRight;
+    property ActiveTop: Integer read FActiveTop;
     property Height: Integer read FHeight;
     property Width: Integer read FWidth;
   end;
@@ -283,6 +290,57 @@ begin
   FActiveRight := -1;
   FActiveBottom := -1;
   FLastTimingLog := 0;
+end;
+
+function TShakeDeformationMap.WeightAtScreen(X, Y: Integer): Double;
+begin
+  if (X < 0) or (X >= FWidth) or (Y < 0) or (Y >= FHeight) or
+    (Length(FWeights) <> FWidth * FHeight) then
+    Exit(0);
+  Result := FWeights[(FHeight - 1 - Y) * FWidth + X];
+end;
+
+procedure TShakeDeformationMap.WeightAndGradientAtScreen(X, Y: Integer;
+  out Weight, GradientX, GradientY: Double);
+var
+  BottomWeight: Double;
+  Index: NativeInt;
+  LeftWeight: Double;
+  RightWeight: Double;
+  TopWeight: Double;
+  WeightY: Integer;
+begin
+  if (X < 0) or (X >= FWidth) or (Y < 0) or (Y >= FHeight) or
+    (Length(FWeights) <> FWidth * FHeight) then
+  begin
+    Weight := 0;
+    GradientX := 0;
+    GradientY := 0;
+    Exit;
+  end;
+
+  WeightY := FHeight - 1 - Y;
+  Index := NativeInt(WeightY) * FWidth + X;
+  Weight := FWeights[Index];
+  if X > 0 then
+    LeftWeight := FWeights[Index - 1]
+  else
+    LeftWeight := 0;
+  if X < FWidth - 1 then
+    RightWeight := FWeights[Index + 1]
+  else
+    RightWeight := 0;
+  // Internal rows use a bottom origin; public gradients use screen Y.
+  if WeightY < FHeight - 1 then
+    TopWeight := FWeights[Index + FWidth]
+  else
+    TopWeight := 0;
+  if WeightY > 0 then
+    BottomWeight := FWeights[Index - FWidth]
+  else
+    BottomWeight := 0;
+  GradientX := (RightWeight - LeftWeight) * 0.5;
+  GradientY := (BottomWeight - TopWeight) * 0.5;
 end;
 
 function TShakeDeformationMap.Build(Width, Height: Integer;

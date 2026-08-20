@@ -28,6 +28,7 @@ type
   end;
 
 var
+  ShakeGroup: TFILTER_ITEM_GROUP;
   DeformationTypeList: array[0..2] of TFILTER_ITEM_SELECT_ITEM;
   DeformationTypeItem: TFILTER_ITEM_SELECT;
   TimeAxisEnabledItem: TFILTER_ITEM_CHECK;
@@ -50,6 +51,7 @@ uses
 
 procedure AddShakeFilterItems;
 begin
+  AddGroup(ShakeGroup, '揺れ', 1);
   ClearSelectList;
   AddSelectList(DeformationTypeList, '外周固定', Ord(sdtFixedOuter));
   AddSelectList(DeformationTypeList, '外周可変', Ord(sdtVariableOuter));

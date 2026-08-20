@@ -6,12 +6,14 @@ interface
 
 uses
   AviUtl2FilterTypes,
+  Shake_PPP_BulgeSettings,
   Shake_PPP_FilterSettings;
 
 procedure InitializeRuntimeDeformer;
 procedure FinalizeRuntimeDeformer;
 procedure ApplyRuntimeDeformation(Video: PFILTER_PROC_VIDEO;
-  const CurveDataText: string; const Settings: TShakeRuntimeSettings);
+  const CurveDataText: string; const ShakeSettings: TShakeRuntimeSettings;
+  const BulgeSettings: TBulgeRuntimeSettings);
 
 implementation
 
@@ -21,6 +23,7 @@ uses
   System.SysUtils,
   Winapi.Windows,
   AviUtl2FilterInfoUtils,
+  Shake_PPP_BulgeDeformer,
   Shake_PPP_CurveData,
   Shake_PPP_CurveModel,
   Shake_PPP_DebugLog,
@@ -52,24 +55,28 @@ type
     FOutput: TBytes;
 {$IFDEF DEBUG}
     FPerfBufferMilliseconds: Double;
-    FPerfDeformMilliseconds: array[0..SHAKE_CURVE_SET_COUNT - 1] of Double;
+    FPerfBulgeMilliseconds: array[0..SHAKE_CURVE_SET_COUNT - 1] of Double;
     FPerfFrameCount: Integer;
     FPerfGetImageMilliseconds: Double;
     FPerfLastLogTick: UInt64;
     FPerfMaximumTotalMilliseconds: Double;
     FPerfSetImageMilliseconds: Double;
+    FPerfShakeMilliseconds: array[0..SHAKE_CURVE_SET_COUNT - 1] of Double;
     FPerfTotalMilliseconds: Double;
     procedure RecordPerformance(Video: PFILTER_PROC_VIDEO;
       BufferMilliseconds, GetImageMilliseconds: Double;
-      const DeformMilliseconds: array of Double;
-      SetImageMilliseconds, TotalMilliseconds: Double);
+      const BulgeMilliseconds, ShakeMilliseconds: array of Double;
+      SetImageMilliseconds, TotalMilliseconds: Double;
+      const BulgeSettings: TBulgeRuntimeSettings);
 {$ENDIF}
     procedure AdvanceMotion(Frame: Integer;
       const Settings: TShakeRuntimeSettings);
     procedure ApplyDeformation(Video: PFILTER_PROC_VIDEO;
       const CurveDataText: string; Width, Height: Integer;
       DisplacementX, DisplacementY: Double;
-      DeformationType: TShakeDeformationType);
+      DeformationType: TShakeDeformationType;
+      const BulgeSettings: TBulgeRuntimeSettings;
+      BulgeEnabled, ShakeEnabled: Boolean);
     function PrepareMaps(Width, Height: Integer;
       const CurveDataText: string): Boolean;
     procedure ResetMotion(Frame: Integer; PositionX, PositionY: Double);
@@ -77,7 +84,8 @@ type
     constructor Create;
     destructor Destroy; override;
     procedure Apply(Video: PFILTER_PROC_VIDEO; const CurveDataText: string;
-      const Settings: TShakeRuntimeSettings);
+      const ShakeSettings: TShakeRuntimeSettings;
+      const BulgeSettings: TBulgeRuntimeSettings);
   end;
 
 var
@@ -121,8 +129,9 @@ end;
 {$IFDEF DEBUG}
 procedure TShakeObjectState.RecordPerformance(Video: PFILTER_PROC_VIDEO;
   BufferMilliseconds, GetImageMilliseconds: Double;
-  const DeformMilliseconds: array of Double;
-  SetImageMilliseconds, TotalMilliseconds: Double);
+  const BulgeMilliseconds, ShakeMilliseconds: array of Double;
+  SetImageMilliseconds, TotalMilliseconds: Double;
+  const BulgeSettings: TBulgeRuntimeSettings);
 var
   CurrentTick: UInt64;
   I: Integer;
@@ -131,10 +140,14 @@ begin
   FPerfBufferMilliseconds := FPerfBufferMilliseconds + BufferMilliseconds;
   FPerfGetImageMilliseconds := FPerfGetImageMilliseconds +
     GetImageMilliseconds;
-  for I := 0 to Min(High(DeformMilliseconds),
+  for I := 0 to Min(High(BulgeMilliseconds),
     SHAKE_CURVE_SET_COUNT - 1) do
-    FPerfDeformMilliseconds[I] := FPerfDeformMilliseconds[I] +
-      DeformMilliseconds[I];
+    FPerfBulgeMilliseconds[I] := FPerfBulgeMilliseconds[I] +
+      BulgeMilliseconds[I];
+  for I := 0 to Min(High(ShakeMilliseconds),
+    SHAKE_CURVE_SET_COUNT - 1) do
+    FPerfShakeMilliseconds[I] := FPerfShakeMilliseconds[I] +
+      ShakeMilliseconds[I];
   FPerfSetImageMilliseconds := FPerfSetImageMilliseconds +
     SetImageMilliseconds;
   FPerfTotalMilliseconds := FPerfTotalMilliseconds + TotalMilliseconds;
@@ -151,20 +164,26 @@ begin
     Exit;
 
   DebugLog(Format(
-    'Runtime performance: objectId=%d effectId=%d frames=%d size=%dx%d avgMs(total=%.3f buffer=%.3f getImage=%.3f deform1=%.3f deform2=%.3f setImage=%.3f) maxTotalMs=%.3f.',
+    'Runtime performance: objectId=%d effectId=%d frames=%d size=%dx%d avgMs(total=%.3f buffer=%.3f getImage=%.3f bulge1=%.3f bulge2=%.3f shake1=%.3f shake2=%.3f setImage=%.3f) maxTotalMs=%.3f display(opacity=%.2f shading=%.2f highlight=%.2f).',
     [Video^.Object_^.ID, Video^.Object_^.EffectID, FPerfFrameCount,
      FWidth, FHeight, FPerfTotalMilliseconds / FPerfFrameCount,
      FPerfBufferMilliseconds / FPerfFrameCount,
      FPerfGetImageMilliseconds / FPerfFrameCount,
-     FPerfDeformMilliseconds[0] / FPerfFrameCount,
-     FPerfDeformMilliseconds[1] / FPerfFrameCount,
+     FPerfBulgeMilliseconds[0] / FPerfFrameCount,
+     FPerfBulgeMilliseconds[1] / FPerfFrameCount,
+     FPerfShakeMilliseconds[0] / FPerfFrameCount,
+     FPerfShakeMilliseconds[1] / FPerfFrameCount,
      FPerfSetImageMilliseconds / FPerfFrameCount,
-     FPerfMaximumTotalMilliseconds]));
+     FPerfMaximumTotalMilliseconds, BulgeSettings.OpacityResponse,
+     BulgeSettings.ShadingStrength, BulgeSettings.HighlightStrength]));
   FPerfFrameCount := 0;
   FPerfBufferMilliseconds := 0;
   FPerfGetImageMilliseconds := 0;
   for I := 0 to SHAKE_CURVE_SET_COUNT - 1 do
-    FPerfDeformMilliseconds[I] := 0;
+  begin
+    FPerfBulgeMilliseconds[I] := 0;
+    FPerfShakeMilliseconds[I] := 0;
+  end;
   FPerfSetImageMilliseconds := 0;
   FPerfTotalMilliseconds := 0;
   FPerfMaximumTotalMilliseconds := 0;
@@ -308,24 +327,36 @@ end;
 procedure TShakeObjectState.ApplyDeformation(
   Video: PFILTER_PROC_VIDEO; const CurveDataText: string;
   Width, Height: Integer; DisplacementX, DisplacementY: Double;
-  DeformationType: TShakeDeformationType);
+  DeformationType: TShakeDeformationType;
+  const BulgeSettings: TBulgeRuntimeSettings;
+  BulgeEnabled, ShakeEnabled: Boolean);
 var
   ByteCount: NativeInt;
   CurrentSource: Pointer;
   ErrorText: string;
   I: Integer;
-  LastReadySet: Integer;
   NextDestination: Pointer;
   Succeeded: Boolean;
 {$IFDEF DEBUG}
   BufferMilliseconds: Double;
-  DeformMilliseconds: array[0..SHAKE_CURVE_SET_COUNT - 1] of Double;
+  BulgeMilliseconds: array[0..SHAKE_CURVE_SET_COUNT - 1] of Double;
   GetImageMilliseconds: Double;
   PerfStageStarted: Int64;
   PerfTotalStarted: Int64;
   SetImageMilliseconds: Double;
+  ShakeMilliseconds: array[0..SHAKE_CURVE_SET_COUNT - 1] of Double;
+  StageMilliseconds: Double;
   TotalMilliseconds: Double;
 {$ENDIF}
+
+  function NextBuffer: Pointer;
+  begin
+    if CurrentSource = Pointer(@FWork[0]) then
+      Result := @FOutput[0]
+    else
+      Result := @FWork[0];
+  end;
+
 begin
   if not PrepareMaps(Width, Height, CurveDataText) then
     Exit;
@@ -333,7 +364,10 @@ begin
   PerfTotalStarted := DebugTimerStart;
   PerfStageStarted := DebugTimerStart;
   for I := 0 to SHAKE_CURVE_SET_COUNT - 1 do
-    DeformMilliseconds[I] := 0;
+  begin
+    BulgeMilliseconds[I] := 0;
+    ShakeMilliseconds[I] := 0;
+  end;
 {$ENDIF}
   ByteCount := NativeInt(Width) * Height * 4;
   SetLength(FSource, ByteCount);
@@ -348,65 +382,90 @@ begin
   GetImageMilliseconds := DebugTimerElapsedMilliseconds(PerfStageStarted);
 {$ENDIF}
   CurrentSource := @FSource[0];
-  LastReadySet := -1;
-  for I := SHAKE_CURVE_SET_COUNT - 1 downto 0 do
-    if FMapReady[I] then
-    begin
-      LastReadySet := I;
-      Break;
-    end;
-  for I := 0 to SHAKE_CURVE_SET_COUNT - 1 do
-    if FMapReady[I] then
-    begin
-      if I = LastReadySet then
-        NextDestination := @FOutput[0]
-      else
-        NextDestination := @FWork[0];
-{$IFDEF DEBUG}
-      PerfStageStarted := DebugTimerStart;
-{$ENDIF}
-      case DeformationType of
-        sdtFixedOuter:
-          Succeeded := FMaps[I].ApplyRgba(CurrentSource, NextDestination,
-            DisplacementX, DisplacementY, ErrorText);
-        sdtVariableOuter:
-          Succeeded := FMaps[I].ApplyVariableOuterRgba(CurrentSource,
-            NextDestination, DisplacementX, DisplacementY, ErrorText);
-      else
-        Succeeded := False;
-        ErrorText := 'UNKNOWN_DEFORMATION_TYPE';
-      end;
-      if not Succeeded then
+  if BulgeEnabled then
+    for I := 0 to SHAKE_CURVE_SET_COUNT - 1 do
+      if FMapReady[I] then
       begin
-        DebugLog(Format('Runtime deformation set %d failed: %s.',
-          [I + 1, ErrorText]));
-        Exit;
-      end;
+        NextDestination := NextBuffer;
 {$IFDEF DEBUG}
-      DeformMilliseconds[I] :=
-        DebugTimerElapsedMilliseconds(PerfStageStarted);
+        PerfStageStarted := DebugTimerStart;
 {$ENDIF}
-      CurrentSource := NextDestination;
-    end;
+        Succeeded := TBulgeDeformer.ApplyRgba(FMaps[I],
+          FCurveSets[I].OuterContour, FCurveSets[I].CenterContour,
+          CurrentSource, NextDestination, BulgeSettings.Amount,
+          BulgeSettings.Shape, BulgeSettings.CenterX,
+          BulgeSettings.CenterY, BulgeSettings.Gravity,
+          BulgeSettings.GravityDirection, BulgeSettings.Mass,
+          BulgeSettings.Tension, BulgeSettings.OpacityResponse,
+          BulgeSettings.ShadingStrength, BulgeSettings.LightDirection,
+          BulgeSettings.HighlightStrength, ErrorText);
+        if not Succeeded then
+        begin
+          DebugLog(Format('Runtime bulge set %d failed: %s.',
+            [I + 1, ErrorText]));
+          Exit;
+        end;
+{$IFDEF DEBUG}
+        StageMilliseconds := DebugTimerElapsedMilliseconds(PerfStageStarted);
+        BulgeMilliseconds[I] := BulgeMilliseconds[I] + StageMilliseconds;
+{$ENDIF}
+        CurrentSource := NextDestination;
+      end;
+
+  if ShakeEnabled then
+    for I := 0 to SHAKE_CURVE_SET_COUNT - 1 do
+      if FMapReady[I] then
+      begin
+        NextDestination := NextBuffer;
+{$IFDEF DEBUG}
+        PerfStageStarted := DebugTimerStart;
+{$ENDIF}
+        case DeformationType of
+          sdtFixedOuter:
+            Succeeded := FMaps[I].ApplyRgba(CurrentSource, NextDestination,
+              DisplacementX, DisplacementY, ErrorText);
+          sdtVariableOuter:
+            Succeeded := FMaps[I].ApplyVariableOuterRgba(CurrentSource,
+              NextDestination, DisplacementX, DisplacementY, ErrorText);
+        else
+          Succeeded := False;
+          ErrorText := 'UNKNOWN_DEFORMATION_TYPE';
+        end;
+        if not Succeeded then
+        begin
+          DebugLog(Format('Runtime shake set %d failed: %s.',
+            [I + 1, ErrorText]));
+          Exit;
+        end;
+{$IFDEF DEBUG}
+        StageMilliseconds := DebugTimerElapsedMilliseconds(PerfStageStarted);
+        ShakeMilliseconds[I] := ShakeMilliseconds[I] + StageMilliseconds;
+{$ENDIF}
+        CurrentSource := NextDestination;
+      end;
 {$IFDEF DEBUG}
   PerfStageStarted := DebugTimerStart;
 {$ENDIF}
-  Video^.SetImageData(PPIXEL_RGBA(@FOutput[0]), Width, Height);
+  Video^.SetImageData(PPIXEL_RGBA(CurrentSource), Width, Height);
 {$IFDEF DEBUG}
   SetImageMilliseconds := DebugTimerElapsedMilliseconds(PerfStageStarted);
   TotalMilliseconds := DebugTimerElapsedMilliseconds(PerfTotalStarted);
   RecordPerformance(Video, BufferMilliseconds, GetImageMilliseconds,
-    DeformMilliseconds, SetImageMilliseconds, TotalMilliseconds);
+    BulgeMilliseconds, ShakeMilliseconds, SetImageMilliseconds,
+    TotalMilliseconds, BulgeSettings);
 {$ENDIF}
 end;
 
 procedure TShakeObjectState.Apply(Video: PFILTER_PROC_VIDEO;
-  const CurveDataText: string; const Settings: TShakeRuntimeSettings);
+  const CurveDataText: string; const ShakeSettings: TShakeRuntimeSettings;
+  const BulgeSettings: TBulgeRuntimeSettings);
 var
+  BulgeEnabled: Boolean;
   DisplacementX: Double;
   DisplacementY: Double;
   Frame: Integer;
   Height: Integer;
+  ShakeEnabled: Boolean;
   Width: Integer;
 begin
   if (Video = nil) or (Video^.Object_ = nil) or
@@ -420,24 +479,34 @@ begin
     (NativeInt(Width) > High(NativeInt) div Height div 4) then
     Exit;
 
-  if not Settings.TimeAxisEnabled then
+  BulgeEnabled := not SameValue(BulgeSettings.Amount, 1.0, 0.0001);
+  DisplacementX := 0;
+  DisplacementY := 0;
+  ShakeEnabled := False;
+  if not ShakeSettings.TimeAxisEnabled then
+    ResetMotion(Frame, ShakeSettings.PositionX, ShakeSettings.PositionY)
+  else
   begin
-    ResetMotion(Frame, Settings.PositionX, Settings.PositionY);
-    Exit;
+    AdvanceMotion(Frame, ShakeSettings);
+    DisplacementX := EnsureRange(
+      FOffsetX * ShakeSettings.HorizontalInfluence,
+      -ShakeSettings.MaximumDeformation,
+      ShakeSettings.MaximumDeformation);
+    DisplacementY := EnsureRange(
+      FOffsetY * ShakeSettings.VerticalInfluence,
+      -ShakeSettings.MaximumDeformation,
+      ShakeSettings.MaximumDeformation);
+    ShakeEnabled := not (SameValue(DisplacementX, 0, 0.005) and
+      SameValue(DisplacementY, 0, 0.005));
   end;
-  AdvanceMotion(Frame, Settings);
-  DisplacementX := EnsureRange(FOffsetX * Settings.HorizontalInfluence,
-    -Settings.MaximumDeformation, Settings.MaximumDeformation);
-  DisplacementY := EnsureRange(FOffsetY * Settings.VerticalInfluence,
-    -Settings.MaximumDeformation, Settings.MaximumDeformation);
-  if SameValue(DisplacementX, 0, 0.005) and
-    SameValue(DisplacementY, 0, 0.005) then
+  if not BulgeEnabled and not ShakeEnabled then
     Exit;
 
-  case Settings.DeformationType of
+  case ShakeSettings.DeformationType of
     sdtFixedOuter, sdtVariableOuter:
       ApplyDeformation(Video, CurveDataText, Width, Height,
-        DisplacementX, DisplacementY, Settings.DeformationType);
+        DisplacementX, DisplacementY, ShakeSettings.DeformationType,
+        BulgeSettings, BulgeEnabled, ShakeEnabled);
   end;
 end;
 
@@ -473,7 +542,8 @@ begin
 end;
 
 procedure ApplyRuntimeDeformation(Video: PFILTER_PROC_VIDEO;
-  const CurveDataText: string; const Settings: TShakeRuntimeSettings);
+  const CurveDataText: string; const ShakeSettings: TShakeRuntimeSettings;
+  const BulgeSettings: TBulgeRuntimeSettings);
 var
   Key: Int64;
   State: TShakeObjectState;
@@ -502,7 +572,7 @@ begin
       State := TShakeObjectState.Create;
       RuntimeStates.Add(Key, State);
     end;
-    State.Apply(Video, CurveDataText, Settings);
+    State.Apply(Video, CurveDataText, ShakeSettings, BulgeSettings);
   finally
 {$IFDEF DEBUG}
     DispatchMilliseconds := DebugTimerElapsedMilliseconds(DispatchStarted);

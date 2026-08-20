@@ -9,10 +9,13 @@ uses
   System.Types,
   System.SysUtils,
   Vcl.Controls,
+  Vcl.ComCtrls,
   Vcl.ExtCtrls,
   Vcl.Forms,
   Vcl.Graphics,
   Vcl.StdCtrls,
+  Shake_PPP_BulgeDeformer,
+  Shake_PPP_BulgeSettings,
   Shake_PPP_CurveModel,
   Shake_PPP_StaticDeformer,
   Shake_PPP_ToolbarButtons;
@@ -37,6 +40,8 @@ type
   private
     FBackground: TBitmap;
     FBackBuffer: TBitmap;
+    FBulgeDeformationMap: TBulgeDeformationMap;
+    FBulgeSettings: TBulgeRuntimeSettings;
     FDeformedBackground: TBitmap;
     FDeformationMap: TShakeDeformationMap;
     FDeformedDirty: Boolean;
@@ -51,6 +56,11 @@ type
     FPaintLogged: Boolean;
     FPanMode: Boolean;
     FPanMoved: Boolean;
+    FPreviewBulgeAmount: Double;
+    FPreviewBulgeLabel: TLabel;
+    FPreviewBulgeResetButton: TButton;
+    FPreviewBulgeTrackBar: TTrackBar;
+    FPreviewBulgeValueLabel: TLabel;
     FRightDownOnClosingSegment: Boolean;
     FOuterContour: TShakeCurve;
     FMotionTimer: TTimer;
@@ -78,6 +88,7 @@ type
     FToolbarSmoothPoint: TShakeToolbarButton;
     FToolbarCurveSet1: TShakeToolbarButton;
     FToolbarCurveSet2: TShakeToolbarButton;
+    FUpdatingPreviewBulgeControls: Boolean;
     FVertexDragging: Boolean;
     FZoomPercent: Integer;
     function ActiveCurve: TShakeCurve;
@@ -86,6 +97,7 @@ type
     function CanvasToNormalized(X, Y: Integer; ClampToImage: Boolean;
       out Position: TPointF): Boolean;
     procedure BeginPan(X, Y: Integer);
+    procedure CreateBulgePreviewControls;
     procedure CreateShapeToolbar;
     procedure DrawCurve(Canvas: TCanvas; Curve: TShakeCurve;
       CurveKind: TShakeCurveKind; IsActive: Boolean);
@@ -95,11 +107,14 @@ type
     function HitTestSegment(X, Y: Integer): Integer;
     function HitTestVertex(X, Y: Integer): Integer;
     function NormalizedToCanvas(const Position: TPointF): TPoint;
+    procedure PreviewBulgeAmountChanged(Sender: TObject);
+    procedure ResetPreviewBulgeAmount(Sender: TObject);
     procedure MarkDeformationDirty;
     procedure FeedMotionFromMouse(X, Y: Integer);
     procedure MotionTimerTick(Sender: TObject);
     procedure ResetMotionPreview;
     procedure SwitchCurveSet(Index: Integer);
+    procedure UpdatePreviewBulgeAmountLabel;
     procedure UpdateToolbarSelection;
     function UpdateDeformedPreview: Boolean;
     procedure SetEditorStatus;
@@ -108,6 +123,7 @@ type
   public
     procedure SetBackgroundRgba(const Pixels: TBytes;
       Width, Height: Integer);
+    procedure SetBulgePreviewSettings(const Settings: TBulgeRuntimeSettings);
     procedure SetCaptureStatus(const Value: string);
     function TryLoadCurveDataText(const Text: string;
       out ErrorText: string): Boolean;
@@ -225,6 +241,53 @@ begin
   PreviewPaintBox.Cursor := crSizeAll;
 end;
 
+procedure TFormShakeSettings.CreateBulgePreviewControls;
+var
+  ControlTop: Integer;
+begin
+  ControlTop := MulDiv(5, CurrentPPI, 96);
+
+  FPreviewBulgeLabel := TLabel.Create(Self);
+  FPreviewBulgeLabel.Parent := TopPanel;
+  FPreviewBulgeLabel.AutoSize := False;
+  FPreviewBulgeLabel.SetBounds(MulDiv(342, CurrentPPI, 96),
+    ControlTop + MulDiv(4, CurrentPPI, 96), MulDiv(104, CurrentPPI, 96),
+    MulDiv(20, CurrentPPI, 96));
+  FPreviewBulgeLabel.Caption := 'プレビュー膨張量';
+  FPreviewBulgeLabel.Font.Color := TopPanel.Font.Color;
+
+  FPreviewBulgeTrackBar := TTrackBar.Create(Self);
+  FPreviewBulgeTrackBar.Parent := TopPanel;
+  FPreviewBulgeTrackBar.SetBounds(MulDiv(446, CurrentPPI, 96), ControlTop,
+    MulDiv(238, CurrentPPI, 96), MulDiv(30, CurrentPPI, 96));
+  FPreviewBulgeTrackBar.Min := 0;
+  FPreviewBulgeTrackBar.Max := 200;
+  FPreviewBulgeTrackBar.Frequency := 10;
+  FPreviewBulgeTrackBar.PageSize := 10;
+  FPreviewBulgeTrackBar.TickStyle := tsNone;
+  FPreviewBulgeTrackBar.Position := 100;
+  FPreviewBulgeTrackBar.OnChange := PreviewBulgeAmountChanged;
+
+  FPreviewBulgeValueLabel := TLabel.Create(Self);
+  FPreviewBulgeValueLabel.Parent := TopPanel;
+  FPreviewBulgeValueLabel.AutoSize := False;
+  FPreviewBulgeValueLabel.Alignment := taRightJustify;
+  FPreviewBulgeValueLabel.SetBounds(MulDiv(686, CurrentPPI, 96),
+    ControlTop + MulDiv(4, CurrentPPI, 96), MulDiv(48, CurrentPPI, 96),
+    MulDiv(20, CurrentPPI, 96));
+  FPreviewBulgeValueLabel.Font.Color := TopPanel.Font.Color;
+
+  FPreviewBulgeResetButton := TButton.Create(Self);
+  FPreviewBulgeResetButton.Parent := TopPanel;
+  FPreviewBulgeResetButton.SetBounds(MulDiv(742, CurrentPPI, 96), ControlTop,
+    MulDiv(86, CurrentPPI, 96), MulDiv(27, CurrentPPI, 96));
+  FPreviewBulgeResetButton.Caption := '100%に戻す';
+  FPreviewBulgeResetButton.OnClick := ResetPreviewBulgeAmount;
+
+  FPreviewBulgeAmount := 1.0;
+  UpdatePreviewBulgeAmountLabel;
+end;
+
 procedure TFormShakeSettings.EnsureBackBuffer;
 begin
   if (FBackBuffer.Width = PreviewPaintBox.ClientWidth) and
@@ -245,7 +308,31 @@ end;
 procedure TFormShakeSettings.MarkDeformationDirty;
 begin
   FDeformedDirty := True;
+  FBulgeDeformationMap.Clear;
   FDeformationMap.Clear;
+end;
+
+procedure TFormShakeSettings.PreviewBulgeAmountChanged(Sender: TObject);
+begin
+  if FUpdatingPreviewBulgeControls then
+    Exit;
+  FPreviewBulgeAmount := FPreviewBulgeTrackBar.Position / 100.0;
+  UpdatePreviewBulgeAmountLabel;
+  { Adjusting this control is an explicit request to inspect the static bulge.
+    Leave motion preview and show the result without requiring another toolbar
+    click. }
+  FPanMode := False;
+  FMotionTimer.Enabled := False;
+  FShowDeformed := True;
+  UpdateToolbarSelection;
+  FDeformedDirty := True;
+  UpdateDeformedPreview;
+  PreviewPaintBox.Invalidate;
+end;
+
+procedure TFormShakeSettings.ResetPreviewBulgeAmount(Sender: TObject);
+begin
+  FPreviewBulgeTrackBar.Position := 100;
 end;
 
 procedure TFormShakeSettings.FeedMotionFromMouse(X, Y: Integer);
@@ -449,24 +536,36 @@ end;
 function TFormShakeSettings.UpdateDeformedPreview: Boolean;
 var
   ErrorText: string;
-  HorizontalDisplacement: Double;
-  VerticalDisplacement: Double;
 begin
   if not FDeformedDirty then
     Exit(True);
-  // The first-stage preview intentionally uses a fixed, clearly visible input.
-  HorizontalDisplacement := FBackground.Width * 0.06;
-  VerticalDisplacement := -FBackground.Height * 0.035;
-  Result := FDeformationMap.Build(FBackground.Width, FBackground.Height,
-    FOuterContour, FCenterContour, ErrorText);
+  Result := True;
+  if (FBulgeDeformationMap.Width <> FBackground.Width) or
+    (FBulgeDeformationMap.Height <> FBackground.Height) then
+    Result := FBulgeDeformationMap.Build(FBackground.Width,
+      FBackground.Height, FOuterContour, FCenterContour, ErrorText);
   if Result then
-    Result := FDeformationMap.Apply(FBackground, FDeformedBackground,
-      HorizontalDisplacement, VerticalDisplacement, ErrorText);
+    Result := FBulgeDeformationMap.Apply(FBackground, FDeformedBackground,
+      FPreviewBulgeAmount, FBulgeSettings.Shape, FBulgeSettings.CenterX,
+      FBulgeSettings.CenterY, FBulgeSettings.Gravity,
+      FBulgeSettings.GravityDirection, FBulgeSettings.Mass,
+      FBulgeSettings.Tension, FBulgeSettings.OpacityResponse,
+      FBulgeSettings.ShadingStrength, FBulgeSettings.LightDirection,
+      FBulgeSettings.HighlightStrength, ErrorText);
   if Result then
   begin
     FDeformedDirty := False;
-    DebugLog(Format('Static deformation preview updated: offset=%.1f,%.1f.',
-      [HorizontalDisplacement, VerticalDisplacement]));
+    DebugLog(Format(
+      'Bulge preview updated: amount=%.3f shape=%.3f centerOffset=(%.3f,%.3f) gravity=%.3f direction=%.1f mass=%.3f tension=%.3f opacity=%.3f shading=%.3f light=%.1f highlight=%.3f.',
+      [FPreviewBulgeAmount, FBulgeSettings.Shape, FBulgeSettings.CenterX,
+       FBulgeSettings.CenterY, FBulgeSettings.Gravity,
+       FBulgeSettings.GravityDirection, FBulgeSettings.Mass,
+       FBulgeSettings.Tension, FBulgeSettings.OpacityResponse,
+       FBulgeSettings.ShadingStrength, FBulgeSettings.LightDirection,
+       FBulgeSettings.HighlightStrength]));
+    if SameValue(FPreviewBulgeAmount, 1.0, 0.0001) then
+      StatusLabel.Caption :=
+        '膨らみプレビュー：膨張量100%のため元画像と同じ表示です。';
   end
   else
   begin
@@ -476,8 +575,8 @@ begin
       ErrorText := '外周を閉じてください。'
     else if ErrorText = 'CENTER_NOT_CLOSED' then
       ErrorText := '重心・頂点範囲を閉じてください。';
-    StatusLabel.Caption := '変形プレビュー：' + ErrorText;
-    DebugLog('Static deformation preview rejected: ' + ErrorText);
+    StatusLabel.Caption := '膨らみプレビュー：' + ErrorText;
+    DebugLog('Bulge preview rejected: ' + ErrorText);
   end;
 end;
 
@@ -543,7 +642,7 @@ begin
   FToolbar.AddSeparator;
   FToolbarOriginalView := FToolbar.AddToggle('元画像',
     stgOriginalView, TOOLBAR_ORIGINAL_VIEW, TOOLBAR_GROUP_VIEW);
-  FToolbarDeformedView := FToolbar.AddToggle('固定量の変形プレビュー',
+  FToolbarDeformedView := FToolbar.AddToggle('膨らみプレビュー',
     stgDeformedView, TOOLBAR_DEFORMED_VIEW, TOOLBAR_GROUP_VIEW);
   FToolbar.AddCommand('全体表示', stgFit, TOOLBAR_FIT);
   FPanMode := False;
@@ -620,6 +719,7 @@ begin
   ApplyDarkTheme;
   FBackground := Vcl.Graphics.TBitmap.Create;
   FBackBuffer := Vcl.Graphics.TBitmap.Create;
+  FBulgeDeformationMap := TBulgeDeformationMap.Create;
   FDeformedBackground := Vcl.Graphics.TBitmap.Create;
   FDeformationMap := TShakeDeformationMap.Create;
   FMotionTimer := TTimer.Create(Self);
@@ -647,6 +747,7 @@ begin
   FSelectedVertex := -1;
   FZoomPercent := 100;
   CreateShapeToolbar;
+  CreateBulgePreviewControls;
   SetEditorStatus;
   DebugLog('Settings form created.');
 end;
@@ -658,6 +759,7 @@ begin
   DebugLog('Settings form destroyed.');
   FMotionTimer.Enabled := False;
   FreeAndNil(FMotionTimer);
+  FBulgeDeformationMap.Free;
   FDeformationMap.Free;
   for I := SHAKE_CURVE_SET_COUNT - 1 downto 0 do
   begin
@@ -835,9 +937,9 @@ begin
       end;
     7:
       begin
+        FPanMode := False;
+        FMotionTimer.Enabled := False;
         FShowDeformed := True;
-        if FPanMode then
-          ResetMotionPreview;
       end;
     8:
       FitImage;
@@ -1081,6 +1183,30 @@ procedure TFormShakeSettings.SetCaptureStatus(const Value: string);
 begin
   StatusLabel.Caption := Value;
   DebugLog('Capture status shown: ' + Value);
+end;
+
+procedure TFormShakeSettings.SetBulgePreviewSettings(
+  const Settings: TBulgeRuntimeSettings);
+begin
+  FBulgeSettings := Settings;
+  FUpdatingPreviewBulgeControls := True;
+  try
+    FPreviewBulgeTrackBar.Position := EnsureRange(
+      Round(Settings.Amount * 100), FPreviewBulgeTrackBar.Min,
+      FPreviewBulgeTrackBar.Max);
+  finally
+    FUpdatingPreviewBulgeControls := False;
+  end;
+  FPreviewBulgeAmount := FPreviewBulgeTrackBar.Position / 100.0;
+  UpdatePreviewBulgeAmountLabel;
+  FDeformedDirty := True;
+  PreviewPaintBox.Invalidate;
+end;
+
+procedure TFormShakeSettings.UpdatePreviewBulgeAmountLabel;
+begin
+  FPreviewBulgeValueLabel.Caption :=
+    Format('%d%%', [FPreviewBulgeTrackBar.Position]);
 end;
 
 function TFormShakeSettings.TryLoadCurveDataText(const Text: string;
