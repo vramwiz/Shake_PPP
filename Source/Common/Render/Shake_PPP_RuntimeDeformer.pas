@@ -27,6 +27,7 @@ uses
   Shake_PPP_CurveData,
   Shake_PPP_CurveModel,
   Shake_PPP_DebugLog,
+  Shake_PPP_GpuBulgeDeformer,
   Shake_PPP_StaticDeformer;
 
 const
@@ -37,6 +38,8 @@ type
   private
     FCurveDataText: string;
     FCurveSets: TShakeCurveSets;
+    FGpuBulge: TGpuBulgeProcessor;
+    FLastGpuStatus: string;
     FHeight: Integer;
     FHasFrame: Boolean;
     FLastFrame: Integer;
@@ -105,6 +108,7 @@ var
   I: Integer;
 begin
   inherited;
+  FGpuBulge := TGpuBulgeProcessor.Create;
   for I := 0 to SHAKE_CURVE_SET_COUNT - 1 do
   begin
     FCurveSets[I].OuterContour := TShakeCurve.Create;
@@ -117,6 +121,7 @@ destructor TShakeObjectState.Destroy;
 var
   I: Integer;
 begin
+  FGpuBulge.Free;
   for I := SHAKE_CURVE_SET_COUNT - 1 downto 0 do
   begin
     FMaps[I].Free;
@@ -303,6 +308,7 @@ begin
   FWidth := Width;
   FHeight := Height;
   FCurveDataText := CurveDataText;
+  FGpuBulge.InvalidateWeights;
   for I := 0 to SHAKE_CURVE_SET_COUNT - 1 do
   begin
     FMaps[I].Clear;
@@ -337,6 +343,7 @@ var
   I: Integer;
   NextDestination: Pointer;
   Succeeded: Boolean;
+  GpuEligible: Boolean;
 {$IFDEF DEBUG}
   BufferMilliseconds: Double;
   BulgeMilliseconds: array[0..SHAKE_CURVE_SET_COUNT - 1] of Double;
@@ -362,12 +369,55 @@ begin
     Exit;
 {$IFDEF DEBUG}
   PerfTotalStarted := DebugTimerStart;
-  PerfStageStarted := DebugTimerStart;
   for I := 0 to SHAKE_CURVE_SET_COUNT - 1 do
   begin
     BulgeMilliseconds[I] := 0;
     ShakeMilliseconds[I] := 0;
   end;
+{$ENDIF}
+  GpuEligible := BulgeEnabled or ShakeEnabled;
+  if GpuEligible then
+  begin
+    Succeeded := FGpuBulge.ApplyCombined(Video, FCurveSets, FMaps,
+      FMapReady, BulgeSettings, BulgeEnabled, ShakeEnabled,
+      DeformationType = sdtVariableOuter, DisplacementX, DisplacementY,
+      ErrorText);
+    if Succeeded then
+    begin
+      if BulgeEnabled and ShakeEnabled then
+      begin
+        if FLastGpuStatus <> 'ACTIVE_ALL' then
+        begin
+          FLastGpuStatus := 'ACTIVE_ALL';
+          DebugLog('Runtime GPU bulge + shake path enabled.');
+        end;
+      end
+      else if ShakeEnabled then
+      begin
+        if FLastGpuStatus <> 'ACTIVE_SHAKE' then
+        begin
+          FLastGpuStatus := 'ACTIVE_SHAKE';
+          DebugLog('Runtime GPU shake path enabled.');
+        end;
+      end
+      else
+      begin
+        if FLastGpuStatus <> 'ACTIVE' then
+        begin
+          FLastGpuStatus := 'ACTIVE';
+          DebugLog('Runtime GPU bulge path enabled.');
+        end;
+      end;
+      Exit;
+    end;
+    if not Succeeded and (FLastGpuStatus <> ErrorText) then
+    begin
+      FLastGpuStatus := ErrorText;
+      DebugLog('Runtime GPU bulge fallback: ' + ErrorText + '.');
+    end;
+  end;
+{$IFDEF DEBUG}
+  PerfStageStarted := DebugTimerStart;
 {$ENDIF}
   ByteCount := NativeInt(Width) * Height * 4;
   SetLength(FSource, ByteCount);
@@ -378,10 +428,10 @@ begin
   PerfStageStarted := DebugTimerStart;
 {$ENDIF}
   Video^.GetImageData(PPIXEL_RGBA(@FSource[0]));
+  CurrentSource := @FSource[0];
 {$IFDEF DEBUG}
   GetImageMilliseconds := DebugTimerElapsedMilliseconds(PerfStageStarted);
 {$ENDIF}
-  CurrentSource := @FSource[0];
   if BulgeEnabled then
     for I := 0 to SHAKE_CURVE_SET_COUNT - 1 do
       if FMapReady[I] then

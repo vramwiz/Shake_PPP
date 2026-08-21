@@ -3,7 +3,7 @@
         <ProjectGuid>{0D4E3867-6594-4D91-9AC8-D2B32FE091FB}</ProjectGuid>
         <ProjectVersion>20.4</ProjectVersion>
         <FrameworkType>None</FrameworkType>
-        <Config Condition="'$(Config)'==''">Debug</Config>
+        <Config Condition="'$(Config)'==''">Release</Config>
         <Platform Condition="'$(Platform)'==''">Win64</Platform>
         <ProjectName Condition="'$(ProjectName)'==''">Shake_PPP</ProjectName>
         <TargetedPlatforms>2</TargetedPlatforms>
@@ -104,6 +104,7 @@
         <DCCReference Include="Source\Common\Settings\Shake_PPP_FilterSettings.pas"/>
         <DCCReference Include="Source\Common\Render\Shake_PPP_CurveRenderer.pas"/>
         <DCCReference Include="Source\Common\Render\Shake_PPP_BulgeDeformer.pas"/>
+        <DCCReference Include="Source\Common\Render\Shake_PPP_GpuBulgeDeformer.pas"/>
         <DCCReference Include="Source\Common\Render\Shake_PPP_StaticDeformer.pas"/>
         <DCCReference Include="Source\Common\Render\Shake_PPP_RuntimeDeformer.pas"/>
         <DCCReference Include="Source\Common\Diagnostics\Shake_PPP_DebugLog.pas"/>

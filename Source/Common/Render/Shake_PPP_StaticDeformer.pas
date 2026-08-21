@@ -21,6 +21,7 @@ type
     procedure Clear;
     function Build(Width, Height: Integer; OuterContour,
       CenterContour: TShakeCurve; out ErrorText: string): Boolean;
+    procedure CopyScreenWeightsToSingles(out Buffer: TArray<Single>);
     function Apply(Source, Destination: TBitmap;
       DisplacementX, DisplacementY: Double;
       out ErrorText: string): Boolean;
@@ -462,6 +463,30 @@ begin
      GetTickCount64 - StartedAt]));
 {$ENDIF}
   Result := True;
+end;
+
+procedure TShakeDeformationMap.CopyScreenWeightsToSingles(
+  out Buffer: TArray<Single>);
+var
+  DestinationIndex: NativeInt;
+  SourceIndex: NativeInt;
+  X: Integer;
+  Y: Integer;
+begin
+  if (FWidth <= 0) or (FHeight <= 0) or
+    (Length(FWeights) <> FWidth * FHeight) then
+  begin
+    Buffer := nil;
+    Exit;
+  end;
+  SetLength(Buffer, NativeInt(FWidth) * FHeight);
+  for Y := 0 to FHeight - 1 do
+  begin
+    SourceIndex := NativeInt(FHeight - 1 - Y) * FWidth;
+    DestinationIndex := NativeInt(Y) * FWidth;
+    for X := 0 to FWidth - 1 do
+      Buffer[DestinationIndex + X] := FWeights[SourceIndex + X];
+  end;
 end;
 
 function TShakeDeformationMap.Apply(Source,

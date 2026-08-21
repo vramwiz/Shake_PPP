@@ -1,0 +1,3 @@
+BULGE_COMPUTE RCDATA "Shake_PPP_BulgeCompute.cso"
+RGBA8_COMPUTE RCDATA "Shake_PPP_Rgba8Compute.cso"
+SHAKE_COMPUTE RCDATA "Shake_PPP_ShakeCompute.cso"

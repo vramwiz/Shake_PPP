@@ -236,6 +236,16 @@ PowerShellでログを追跡する場合は次を実行します。
 Get-Content -LiteralPath 'C:\ProgramData\aviutl2\Plugin\Shake_PPP\Shake_PPP_debug.log' -Tail 20 -Wait
 ```
 
+### GPU処理（第一段階）
+
+入力画像をD3D11テクスチャとして取得できる環境では、膨らみと揺れをCompute Shaderで実行します。膨張量、膨らみ方、膨張中心、重力、質量、張力、透明度連動、陰影、光源方向、ハイライト、2形状セットに加え、固定外周・可変外周の揺れへ対応します。膨らみの表示補正と揺れはGPU作業テクスチャ上で連続処理し、最後に一度だけRGBA8へ変換して読み戻し、AviUtl2の`SetImageData`へ渡します。膨張量100%の揺れ単独フレームもGPU経路を使用します。
+
+GPU初期化、テクスチャ形式、リソース作成、読戻しのいずれかに失敗した場合もCPU処理へ自動的に戻ります。追加ランタイムは不要で、コンパイル済みHLSLをプラグインリソースへ埋め込んでいます。Debugログの`Runtime GPU bulge path enabled.`でGPU経路の採用、`Runtime GPU bulge fallback:`でCPUへ戻った理由、`Runtime GPU performance:`でGPU完了待ちと読戻しを含むCPU側の往復時間を確認できます。
+
+膨らみと揺れの全GPU経路が採用された場合は`Runtime GPU bulge + shake path enabled.`、揺れ単独では`Runtime GPU shake path enabled.`とDebugログへ記録されます。
+
+`Tests\GpuBulgeTest.dpr`はD3D11 WARPデバイス上でCompute Shaderを実行し、GPU版とCPU版の画素差を検証します。
+
 ### 配布ZIPの作成
 
 Release Win64をビルドした後、次のバッチを実行します。

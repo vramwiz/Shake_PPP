@@ -14,6 +14,7 @@ uses
   Shake_PPP_FilterSettings in 'Source\Common\Settings\Shake_PPP_FilterSettings.pas',
   Shake_PPP_CurveRenderer in 'Source\Common\Render\Shake_PPP_CurveRenderer.pas',
   Shake_PPP_BulgeDeformer in 'Source\Common\Render\Shake_PPP_BulgeDeformer.pas',
+  Shake_PPP_GpuBulgeDeformer in 'Source\Common\Render\Shake_PPP_GpuBulgeDeformer.pas',
   Shake_PPP_StaticDeformer in 'Source\Common\Render\Shake_PPP_StaticDeformer.pas',
   Shake_PPP_RuntimeDeformer in 'Source\Common\Render\Shake_PPP_RuntimeDeformer.pas',
   Shake_PPP_DebugLog in 'Source\Common\Diagnostics\Shake_PPP_DebugLog.pas',
