@@ -16,7 +16,7 @@ function TryDecodeCurveData(const Text: string; OuterContour,
 function TryEncodeCurveData(OuterContour, CenterContour: TShakeCurve;
   out Text, ErrorText: string): Boolean;
 function TryDecodeCurveSets(const Text: string;
-  const CurveSets: TShakeCurveSets; out ErrorText: string): Boolean;
+  var CurveSets: TShakeCurveSets; out ErrorText: string): Boolean;
 function TryEncodeCurveSets(const CurveSets: TShakeCurveSets;
   out Text, ErrorText: string): Boolean;
 
@@ -30,6 +30,7 @@ uses
 const
   CURVE_DATA_PREFIX_V1 = 'SPP1';
   CURVE_DATA_PREFIX_V2 = 'SPP2';
+  CURVE_DATA_PREFIX_V3 = 'SPP3';
 
 function InvariantFormatSettings: TFormatSettings;
 begin
@@ -106,12 +107,26 @@ begin
   Result := True;
 end;
 
+function TryEncodeMovableArc(const Marker: string;
+  const CurveSet: TShakeCurveSet; out Text, ErrorText: string): Boolean;
+begin
+  ErrorText := '';
+  if HasValidMovableArc(CurveSet) then
+    Text := Format('%s,%d,%d,%d', [Marker, CurveSet.MovableArcStart,
+      CurveSet.MovableArcEnd, Ord(CurveSet.MovableArcReversed)])
+  else
+    Text := Marker + ',-1,-1,0';
+  Result := True;
+end;
+
 function TryEncodeCurveSets(const CurveSets: TShakeCurveSets;
   out Text, ErrorText: string): Boolean;
 var
   CenterText1: string;
   CenterText2: string;
   FormatSettings: TFormatSettings;
+  ArcText1: string;
+  ArcText2: string;
   OuterText1: string;
   OuterText2: string;
 begin
@@ -130,14 +145,56 @@ begin
   if not TryEncodeCurve('2C', CurveSets[1].CenterContour, FormatSettings,
     CenterText2, ErrorText) then
     Exit(False);
-  Text := CURVE_DATA_PREFIX_V2 + '|' + OuterText1 + '|' + CenterText1 +
-    '|' + OuterText2 + '|' + CenterText2;
+  if not TryEncodeMovableArc('1A', CurveSets[0], ArcText1,
+    ErrorText) or not TryEncodeMovableArc('2A', CurveSets[1], ArcText2,
+    ErrorText) then
+    Exit(False);
+  Text := CURVE_DATA_PREFIX_V3 + '|' + OuterText1 + '|' + CenterText1 +
+    '|' + ArcText1 + '|' + OuterText2 + '|' + CenterText2 + '|' + ArcText2;
   if Length(Text) > MAX_SHAKE_CURVE_DATA_LENGTH then
   begin
     ErrorText := '曲線データが1行テキストの上限を超えています。';
     Text := '';
     Exit(False);
   end;
+  Result := True;
+end;
+
+function TryDecodeMovableArc(const Text, ExpectedMarker: string;
+  var CurveSet: TShakeCurveSet; out ErrorText: string): Boolean;
+var
+  EndIndex: Integer;
+  Fields: TArray<string>;
+  ReversedValue: Integer;
+  StartIndex: Integer;
+begin
+  Result := False;
+  ErrorText := '';
+  Fields := Text.Split([',']);
+  if (Length(Fields) <> 4) or (Fields[0] <> ExpectedMarker) or
+    not TryStrToInt(Fields[1], StartIndex) or
+    not TryStrToInt(Fields[2], EndIndex) or
+    not TryStrToInt(Fields[3], ReversedValue) or
+    (ReversedValue < 0) or (ReversedValue > 1) then
+  begin
+    ErrorText := ExpectedMarker + '可動範囲のヘッダーが不正です。';
+    Exit;
+  end;
+  if (StartIndex = -1) and (EndIndex = -1) then
+  begin
+    ResetMovableArc(CurveSet);
+    Exit(True);
+  end;
+  if (StartIndex < 0) or (StartIndex >= CurveSet.OuterContour.Count) or
+    (EndIndex < 0) or (EndIndex >= CurveSet.OuterContour.Count) or
+    (StartIndex = EndIndex) or not CurveSet.OuterContour.Closed then
+  begin
+    ErrorText := ExpectedMarker + '可動範囲の頂点が不正です。';
+    Exit;
+  end;
+  CurveSet.MovableArcStart := StartIndex;
+  CurveSet.MovableArcEnd := EndIndex;
+  CurveSet.MovableArcReversed := ReversedValue = 1;
   Result := True;
 end;
 
@@ -251,7 +308,7 @@ begin
 end;
 
 function TryDecodeCurveSets(const Text: string;
-  const CurveSets: TShakeCurveSets; out ErrorText: string): Boolean;
+  var CurveSets: TShakeCurveSets; out ErrorText: string): Boolean;
 var
   FormatSettings: TFormatSettings;
   I: Integer;
@@ -273,6 +330,7 @@ begin
     begin
       CurveSets[I].OuterContour.Clear;
       CurveSets[I].CenterContour.Clear;
+      ResetMovableArc(CurveSets[I]);
     end;
     Exit(True);
   end;
@@ -285,6 +343,7 @@ begin
   begin
     TemporarySets[I].OuterContour := TShakeCurve.Create;
     TemporarySets[I].CenterContour := TShakeCurve.Create;
+    ResetMovableArc(TemporarySets[I]);
   end;
   try
     Parts := Text.Split(['|']);
@@ -309,6 +368,22 @@ begin
         TemporarySets[1].CenterContour, ErrorText) then
         Exit;
     end
+    else if (Length(Parts) = 7) and (Parts[0] = CURVE_DATA_PREFIX_V3) then
+    begin
+      if not TryDecodeCurve(Parts[1], '1O', FormatSettings,
+        TemporarySets[0].OuterContour, ErrorText) or
+        not TryDecodeCurve(Parts[2], '1C', FormatSettings,
+        TemporarySets[0].CenterContour, ErrorText) or
+        not TryDecodeMovableArc(Parts[3], '1A', TemporarySets[0],
+        ErrorText) or
+        not TryDecodeCurve(Parts[4], '2O', FormatSettings,
+        TemporarySets[1].OuterContour, ErrorText) or
+        not TryDecodeCurve(Parts[5], '2C', FormatSettings,
+        TemporarySets[1].CenterContour, ErrorText) or
+        not TryDecodeMovableArc(Parts[6], '2A', TemporarySets[1],
+        ErrorText) then
+        Exit;
+    end
     else
     begin
       ErrorText := '未対応の曲線データ形式です。';
@@ -318,6 +393,10 @@ begin
     begin
       CurveSets[I].OuterContour.Assign(TemporarySets[I].OuterContour);
       CurveSets[I].CenterContour.Assign(TemporarySets[I].CenterContour);
+      CurveSets[I].MovableArcStart := TemporarySets[I].MovableArcStart;
+      CurveSets[I].MovableArcEnd := TemporarySets[I].MovableArcEnd;
+      CurveSets[I].MovableArcReversed :=
+        TemporarySets[I].MovableArcReversed;
     end;
     Result := True;
   finally

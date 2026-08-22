@@ -45,13 +45,37 @@ type
   TShakeCurveSet = record
     OuterContour: TShakeCurve;
     CenterContour: TShakeCurve;
+    MovableArcStart: Integer;
+    MovableArcEnd: Integer;
+    MovableArcReversed: Boolean;
   end;
   TShakeCurveSets = array[0..SHAKE_CURVE_SET_COUNT - 1] of TShakeCurveSet;
+
+procedure ResetMovableArc(var CurveSet: TShakeCurveSet);
+function HasValidMovableArc(const CurveSet: TShakeCurveSet): Boolean;
 
 implementation
 
 uses
   System.Math;
+
+procedure ResetMovableArc(var CurveSet: TShakeCurveSet);
+begin
+  CurveSet.MovableArcStart := -1;
+  CurveSet.MovableArcEnd := -1;
+  CurveSet.MovableArcReversed := False;
+end;
+
+function HasValidMovableArc(const CurveSet: TShakeCurveSet): Boolean;
+begin
+  Result := (CurveSet.OuterContour <> nil) and
+    CurveSet.OuterContour.Closed and
+    (CurveSet.MovableArcStart >= 0) and
+    (CurveSet.MovableArcStart < CurveSet.OuterContour.Count) and
+    (CurveSet.MovableArcEnd >= 0) and
+    (CurveSet.MovableArcEnd < CurveSet.OuterContour.Count) and
+    (CurveSet.MovableArcStart <> CurveSet.MovableArcEnd);
+end;
 
 constructor TShakeCurve.Create;
 begin

@@ -62,8 +62,11 @@ begin
 
     Sets[1].OuterContour.AddVertex(PointF(0.2, 0.3), svkCorner);
     Sets[1].CenterContour.AddVertex(PointF(0.7, 0.6), svkSmooth);
+    Sets[0].MovableArcStart := 0;
+    Sets[0].MovableArcEnd := 2;
+    Sets[0].MovableArcReversed := True;
     Require(TryEncodeCurveSets(Sets, Text, ErrorText), ErrorText);
-    Require(Text.StartsWith('SPP2|'), 'Two-set format prefix is invalid.');
+    Require(Text.StartsWith('SPP3|'), 'Arc format prefix is invalid.');
     Require(TryDecodeCurveSets(Text, DecodedSets, ErrorText), ErrorText);
     Require(DecodedSets[0].OuterContour.Count = 3,
       'Set 1 outer curve changed.');
@@ -71,10 +74,16 @@ begin
       'Set 2 outer curve changed.');
     Require(DecodedSets[1].CenterContour[0].Kind = svkSmooth,
       'Set 2 center vertex kind changed.');
+    Require((DecodedSets[0].MovableArcStart = 0) and
+      (DecodedSets[0].MovableArcEnd = 2) and
+      DecodedSets[0].MovableArcReversed,
+      'Movable arc changed during round trip.');
     Require(TryDecodeCurveSets(OldText, DecodedSets, ErrorText), ErrorText);
     Require((DecodedSets[0].OuterContour.Count = 3) and
       (DecodedSets[1].OuterContour.Count = 0),
       'SPP1 compatibility conversion failed.');
+    Require(not HasValidMovableArc(DecodedSets[0]),
+      'SPP1 unexpectedly restored a movable arc.');
 
     Require(not TryDecodeCurveData('SPP1|O,1;bad|C,0',
       DecodedOuter, DecodedCenter, ErrorText),

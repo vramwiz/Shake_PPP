@@ -88,11 +88,15 @@ var
   Maps: array[0..SHAKE_CURVE_SET_COUNT - 1] of TShakeDeformationMap;
   MaximumDifference: Integer;
   Offset: NativeInt;
+  OutlineDarkPixels: Integer;
+  OutlineDifference: Integer;
   OutputPixels: Pointer;
   Settings: TBulgeRuntimeSettings;
   SourceBytes: TBytes;
   Video: TFILTER_PROC_VIDEO;
   VariableShakeDifference: Integer;
+  VariableBulgeDifference: Integer;
+  VariableBulgeDisplayDifference: Integer;
   X: Integer;
   Y: Integer;
 begin
@@ -212,6 +216,58 @@ begin
     Settings.HighlightStrength := 0;
 
     Require(Gpu.ApplyCombined(@Video, CurveSets, Maps, MapReady, Settings,
+      True, False, True, 0, 0, ErrorText), ErrorText);
+    GpuBytes := Copy(CapturedOutput);
+    Require(TBulgeDeformer.ApplyVariableOuterRgba(Maps[0],
+      CurveSets[0].OuterContour, CurveSets[0].CenterContour,
+      @SourceBytes[0], @CpuOutput[0], Settings.Amount, Settings.Shape,
+      Settings.CenterX, Settings.CenterY, Settings.Gravity,
+      Settings.GravityDirection, Settings.Mass, Settings.Tension, 0, 0,
+      0, 0, CurveSets[0].MovableArcStart,
+      CurveSets[0].MovableArcEnd, CurveSets[0].MovableArcReversed,
+      ErrorText), ErrorText);
+    VariableBulgeDifference := 0;
+    for I := 0 to Length(CpuOutput) - 1 do
+      VariableBulgeDifference := Max(VariableBulgeDifference,
+        Abs(Integer(CpuOutput[I]) - Integer(GpuBytes[I])));
+    Require(VariableBulgeDifference <= 3, Format(
+      'GPU variable bulge differs from CPU output by %d.',
+      [VariableBulgeDifference]));
+    Offset := (NativeInt(48) * IMAGE_WIDTH + 122) * 4;
+    Require(GpuBytes[Offset] <> SourceBytes[Offset],
+      'Variable outer bulge did not expand beyond the fixed contour.');
+
+    CurveSets[0].MovableArcStart := 0;
+    CurveSets[0].MovableArcEnd := 6;
+    Settings.OpacityResponse := 0.65;
+    Settings.ShadingStrength := 0.45;
+    Settings.LightDirection := 35.0;
+    Settings.HighlightStrength := 0.70;
+    Require(Gpu.ApplyCombined(@Video, CurveSets, Maps, MapReady, Settings,
+      True, False, True, 0, 0, ErrorText), ErrorText);
+    GpuBytes := Copy(CapturedOutput);
+    Require(TBulgeDeformer.ApplyVariableOuterRgba(Maps[0],
+      CurveSets[0].OuterContour, CurveSets[0].CenterContour,
+      @SourceBytes[0], @CpuOutput[0], Settings.Amount, Settings.Shape,
+      Settings.CenterX, Settings.CenterY, Settings.Gravity,
+      Settings.GravityDirection, Settings.Mass, Settings.Tension,
+      Settings.OpacityResponse, Settings.ShadingStrength,
+      Settings.LightDirection, Settings.HighlightStrength,
+      CurveSets[0].MovableArcStart, CurveSets[0].MovableArcEnd,
+      CurveSets[0].MovableArcReversed, ErrorText),
+      ErrorText);
+    VariableBulgeDisplayDifference := 0;
+    for I := 0 to Length(CpuOutput) - 1 do
+      VariableBulgeDisplayDifference := Max(VariableBulgeDisplayDifference,
+        Abs(Integer(CpuOutput[I]) - Integer(GpuBytes[I])));
+    Require(VariableBulgeDisplayDifference <= 3, Format(
+      'GPU variable bulge display correction differs from CPU output by %d.',
+      [VariableBulgeDisplayDifference]));
+    Settings.OpacityResponse := 0;
+    Settings.ShadingStrength := 0;
+    Settings.HighlightStrength := 0;
+
+    Require(Gpu.ApplyCombined(@Video, CurveSets, Maps, MapReady, Settings,
       False, True, False, 12.75, -8.5, ErrorText), ErrorText);
     GpuBytes := Copy(CapturedOutput);
     Require(Maps[0].ApplyRgba(@SourceBytes[0], @CpuOutput[0],
@@ -262,10 +318,82 @@ begin
       'GPU combined deformation differs from CPU output by %d.',
       [CombinedDifference]));
 
+    // Rebuild the input as an opaque white shape with a black contour on a
+    // transparent background.  The contour occupies the low-weight band and
+    // must remain visible after variable-outer expansion.
+    for Y := 0 to IMAGE_HEIGHT - 1 do
+      for X := 0 to IMAGE_WIDTH - 1 do
+      begin
+        Offset := (NativeInt(Y) * IMAGE_WIDTH + X) * 4;
+        if Maps[0].WeightAtScreen(X, Y) <= 0 then
+        begin
+          SourceBytes[Offset] := 0;
+          SourceBytes[Offset + 1] := 0;
+          SourceBytes[Offset + 2] := 0;
+          SourceBytes[Offset + 3] := 0;
+        end
+        else if Maps[0].WeightAtScreen(X, Y) < 0.10 then
+        begin
+          SourceBytes[Offset] := 0;
+          SourceBytes[Offset + 1] := 0;
+          SourceBytes[Offset + 2] := 0;
+          SourceBytes[Offset + 3] := 255;
+        end
+        else
+        begin
+          SourceBytes[Offset] := 255;
+          SourceBytes[Offset + 1] := 255;
+          SourceBytes[Offset + 2] := 255;
+          SourceBytes[Offset + 3] := 255;
+        end;
+      end;
+    Context.UpdateSubresource(ID3D11Resource(InputTexture), 0, nil,
+      @SourceBytes[0], IMAGE_WIDTH * 4, 0);
+    Settings.Amount := 1.67;
+    Settings.Shape := 0.5;
+    Settings.CenterX := 0;
+    Settings.CenterY := 0;
+    Settings.Gravity := 0;
+    Settings.OpacityResponse := 0;
+    Settings.ShadingStrength := 0;
+    Settings.HighlightStrength := 0;
+    Require(Gpu.ApplyCombined(@Video, CurveSets, Maps, MapReady, Settings,
+      True, False, True, 0, 0, ErrorText), ErrorText);
+    GpuBytes := Copy(CapturedOutput);
+    Require(TBulgeDeformer.ApplyVariableOuterRgba(Maps[0],
+      CurveSets[0].OuterContour, CurveSets[0].CenterContour,
+      @SourceBytes[0], @CpuOutput[0], Settings.Amount, Settings.Shape,
+      Settings.CenterX, Settings.CenterY, Settings.Gravity,
+      Settings.GravityDirection, Settings.Mass, Settings.Tension,
+      0, 0, 0, 0, CurveSets[0].MovableArcStart,
+      CurveSets[0].MovableArcEnd, CurveSets[0].MovableArcReversed,
+      ErrorText), ErrorText);
+    OutlineDifference := 0;
+    OutlineDarkPixels := 0;
+    for I := 0 to Length(CpuOutput) - 1 do
+      OutlineDifference := Max(OutlineDifference,
+        Abs(Integer(CpuOutput[I]) - Integer(GpuBytes[I])));
+    for Y := Maps[0].ActiveBottom + 1 to IMAGE_HEIGHT - 1 do
+      for X := 0 to IMAGE_WIDTH - 1 do
+      begin
+        Offset := (NativeInt(Y) * IMAGE_WIDTH + X) * 4;
+        if (GpuBytes[Offset + 3] >= 128) and
+          (GpuBytes[Offset] <= 64) and (GpuBytes[Offset + 1] <= 64) and
+          (GpuBytes[Offset + 2] <= 64) then
+          Inc(OutlineDarkPixels);
+      end;
+    Require(OutlineDifference <= 3, Format(
+      'GPU outlined bulge differs from CPU output by %d.',
+      [OutlineDifference]));
+    Require(OutlineDarkPixels > 0,
+      'Variable outer bulge lost the black contour after expansion.');
+
     Writeln(Format(
-      'GpuBulgeTest: PASS bulge=%d display=%d fixedShake=%d variableShake=%d combined=%d',
-      [MaximumDifference, DisplayDifference, FixedShakeDifference,
-       VariableShakeDifference, CombinedDifference]));
+      'GpuBulgeTest: PASS bulge=%d variableBulge=%d variableDisplay=%d display=%d fixedShake=%d variableShake=%d combined=%d outline=%d darkPixels=%d',
+      [MaximumDifference, VariableBulgeDifference,
+       VariableBulgeDisplayDifference, DisplayDifference,
+       FixedShakeDifference, VariableShakeDifference,
+       CombinedDifference, OutlineDifference, OutlineDarkPixels]));
   finally
     Gpu.Free;
     for I := SHAKE_CURVE_SET_COUNT - 1 downto 0 do

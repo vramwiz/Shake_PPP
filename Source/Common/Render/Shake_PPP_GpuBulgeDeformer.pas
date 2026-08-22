@@ -86,6 +86,7 @@ implementation
 uses
   System.Classes,
   System.Math,
+  System.Types,
   Winapi.D3D11,
   Winapi.DxgiFormat,
   Winapi.Windows,
@@ -110,7 +111,7 @@ type
     OuterHalfWidth: Single;
     OuterHalfHeight: Single;
     GravityResponse: Single;
-    Padding2: Single;
+    VariableOuter: Single;
     GravityDirectionX: Single;
     GravityDirectionY: Single;
     OpacityResponse: Single;
@@ -123,6 +124,10 @@ type
     HalfY: Single;
     HalfZ: Single;
     Padding3: Single;
+    MovableArcStartAngle: Single;
+    MovableArcSpan: Single;
+    MovableArcDirection: Single;
+    MovableArcEnabled: Single;
   end;
 
 const
@@ -521,6 +526,8 @@ var
   CurrentIndex: Integer;
   Device: ID3D11Device;
   DirectionRadians: Double;
+  EndIndex: Integer;
+  EndPosition: TPointF;
   GravityResponse: Double;
   HalfLength: Double;
   I: Integer;
@@ -532,6 +539,10 @@ var
   NoUnorderedView: ID3D11UnorderedAccessView;
   OuterHalfHeight: Double;
   OuterHalfWidth: Double;
+  OuterScale: Double;
+  SignedArea: Double;
+  StartIndex: Integer;
+  StartPosition: TPointF;
   Rgba8Shader: ID3D11ComputeShader;
   Sampler: ID3D11SamplerState;
   Shader: ID3D11ComputeShader;
@@ -543,6 +554,10 @@ var
   Y: Integer;
   ShiftX: Double;
   ShiftY: Double;
+  TransformedBottom: Double;
+  TransformedLeft: Double;
+  TransformedRight: Double;
+  TransformedTop: Double;
 {$IFDEF DEBUG}
   StartedAt: Int64;
 {$ENDIF}
@@ -584,10 +599,6 @@ begin
       FillChar(Constants, SizeOf(Constants), 0);
       Constants.ImageWidth := FWidth;
       Constants.ImageHeight := FHeight;
-      Constants.ActiveLeft := Maps[I].ActiveLeft;
-      Constants.ActiveTop := Maps[I].ActiveTop;
-      Constants.ActiveWidth := Maps[I].ActiveRight - Maps[I].ActiveLeft + 1;
-      Constants.ActiveHeight := Maps[I].ActiveBottom - Maps[I].ActiveTop + 1;
       Constants.Amount := Settings.Amount;
       Constants.ShapeExponent := Power(2.0,
         (0.5 - EnsureRange(Settings.Shape, 0.0, 1.0)) * 2.0);
@@ -598,12 +609,45 @@ begin
         OuterHalfWidth, 0.0, FWidth - 1.0);
       Constants.CenterY := EnsureRange(BaseCenterY + Settings.CenterY *
         OuterHalfHeight, 0.0, FHeight - 1.0);
+      if VariableOuter then
+      begin
+        OuterScale := Max(0.05, 1 + (EnsureRange(Settings.Amount,
+          0.0, 2.0) - 1) * 0.35);
+        TransformedLeft := Constants.CenterX +
+          (Maps[I].ActiveLeft - Constants.CenterX) * OuterScale;
+        TransformedTop := Constants.CenterY +
+          (Maps[I].ActiveTop - Constants.CenterY) * OuterScale;
+        TransformedRight := Constants.CenterX +
+          (Maps[I].ActiveRight - Constants.CenterX) * OuterScale;
+        TransformedBottom := Constants.CenterY +
+          (Maps[I].ActiveBottom - Constants.CenterY) * OuterScale;
+        AffectedLeft := EnsureRange(Floor(Min(Maps[I].ActiveLeft,
+          TransformedLeft)), 0, FWidth - 1);
+        AffectedTop := EnsureRange(Floor(Min(Maps[I].ActiveTop,
+          TransformedTop)), 0, FHeight - 1);
+        AffectedRight := EnsureRange(Ceil(Max(Maps[I].ActiveRight,
+          TransformedRight)), 0, FWidth - 1);
+        AffectedBottom := EnsureRange(Ceil(Max(Maps[I].ActiveBottom,
+          TransformedBottom)), 0, FHeight - 1);
+      end
+      else
+      begin
+        AffectedLeft := Maps[I].ActiveLeft;
+        AffectedTop := Maps[I].ActiveTop;
+        AffectedRight := Maps[I].ActiveRight;
+        AffectedBottom := Maps[I].ActiveBottom;
+      end;
+      Constants.ActiveLeft := AffectedLeft;
+      Constants.ActiveTop := AffectedTop;
+      Constants.ActiveWidth := AffectedRight - AffectedLeft + 1;
+      Constants.ActiveHeight := AffectedBottom - AffectedTop + 1;
       Constants.OuterHalfWidth := OuterHalfWidth;
       Constants.OuterHalfHeight := OuterHalfHeight;
       GravityResponse := EnsureRange(Settings.Gravity, 0.0, 1.0) *
         (0.5 + EnsureRange(Settings.Mass, 0.0, 1.0)) *
         (1.5 - EnsureRange(Settings.Tension, 0.0, 1.0));
       Constants.GravityResponse := EnsureRange(GravityResponse, 0.0, 2.0);
+      Constants.VariableOuter := Ord(VariableOuter);
       DirectionRadians := DegToRad(Settings.GravityDirection);
       Constants.GravityDirectionX := Cos(DirectionRadians);
       Constants.GravityDirectionY := Sin(DirectionRadians);
@@ -626,6 +670,50 @@ begin
       Constants.HalfX := Constants.HalfX / HalfLength;
       Constants.HalfY := Constants.HalfY / HalfLength;
       Constants.HalfZ := Constants.HalfZ / HalfLength;
+      if HasValidMovableArc(CurveSets[I]) then
+      begin
+        StartIndex := CurveSets[I].MovableArcStart;
+        EndIndex := CurveSets[I].MovableArcEnd;
+        if CurveSets[I].MovableArcReversed then
+        begin
+          Y := StartIndex;
+          StartIndex := EndIndex;
+          EndIndex := Y;
+        end;
+        SignedArea := 0;
+        for Y := 0 to CurveSets[I].OuterContour.Count - 1 do
+          SignedArea := SignedArea +
+            CurveSets[I].OuterContour[Y].Position.X *
+              CurveSets[I].OuterContour[(Y + 1) mod
+                CurveSets[I].OuterContour.Count].Position.Y -
+            CurveSets[I].OuterContour[(Y + 1) mod
+              CurveSets[I].OuterContour.Count].Position.X *
+                CurveSets[I].OuterContour[Y].Position.Y;
+        if SignedArea >= 0 then
+          Constants.MovableArcDirection := 1
+        else
+          Constants.MovableArcDirection := -1;
+        StartPosition := CurveSets[I].OuterContour[StartIndex].Position;
+        EndPosition := CurveSets[I].OuterContour[EndIndex].Position;
+        Constants.MovableArcStartAngle := ArcTan2(
+          (StartPosition.Y * Max(1, FHeight - 1) - Constants.CenterY) /
+            Max(1.0, OuterHalfHeight),
+          (StartPosition.X * Max(1, FWidth - 1) - Constants.CenterX) /
+            Max(1.0, OuterHalfWidth));
+        Constants.MovableArcSpan := Constants.MovableArcDirection *
+          (ArcTan2(
+            (EndPosition.Y * Max(1, FHeight - 1) - Constants.CenterY) /
+              Max(1.0, OuterHalfHeight),
+            (EndPosition.X * Max(1, FWidth - 1) - Constants.CenterX) /
+              Max(1.0, OuterHalfWidth)) -
+            Constants.MovableArcStartAngle);
+        while Constants.MovableArcSpan < 0 do
+          Constants.MovableArcSpan := Constants.MovableArcSpan + 2 * Pi;
+        while Constants.MovableArcSpan >= 2 * Pi do
+          Constants.MovableArcSpan := Constants.MovableArcSpan - 2 * Pi;
+        Constants.MovableArcEnabled :=
+          Ord(Constants.MovableArcSpan > 0.000001);
+      end;
       ConstantBuffer := ID3D11Buffer(FConstantBuffers[I]);
       Context.UpdateSubresource(ConstantBuffer, 0, nil, @Constants, 0, 0);
       ShaderViews[0] := ID3D11ShaderResourceView(

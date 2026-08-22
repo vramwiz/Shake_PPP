@@ -440,15 +440,34 @@ begin
 {$IFDEF DEBUG}
         PerfStageStarted := DebugTimerStart;
 {$ENDIF}
-        Succeeded := TBulgeDeformer.ApplyRgba(FMaps[I],
-          FCurveSets[I].OuterContour, FCurveSets[I].CenterContour,
-          CurrentSource, NextDestination, BulgeSettings.Amount,
-          BulgeSettings.Shape, BulgeSettings.CenterX,
-          BulgeSettings.CenterY, BulgeSettings.Gravity,
-          BulgeSettings.GravityDirection, BulgeSettings.Mass,
-          BulgeSettings.Tension, BulgeSettings.OpacityResponse,
-          BulgeSettings.ShadingStrength, BulgeSettings.LightDirection,
-          BulgeSettings.HighlightStrength, ErrorText);
+        case DeformationType of
+          sdtFixedOuter:
+            Succeeded := TBulgeDeformer.ApplyRgba(FMaps[I],
+              FCurveSets[I].OuterContour, FCurveSets[I].CenterContour,
+              CurrentSource, NextDestination, BulgeSettings.Amount,
+              BulgeSettings.Shape, BulgeSettings.CenterX,
+              BulgeSettings.CenterY, BulgeSettings.Gravity,
+              BulgeSettings.GravityDirection, BulgeSettings.Mass,
+              BulgeSettings.Tension, BulgeSettings.OpacityResponse,
+              BulgeSettings.ShadingStrength, BulgeSettings.LightDirection,
+              BulgeSettings.HighlightStrength, ErrorText);
+          sdtVariableOuter:
+            Succeeded := TBulgeDeformer.ApplyVariableOuterRgba(FMaps[I],
+              FCurveSets[I].OuterContour, FCurveSets[I].CenterContour,
+              CurrentSource, NextDestination, BulgeSettings.Amount,
+              BulgeSettings.Shape, BulgeSettings.CenterX,
+              BulgeSettings.CenterY, BulgeSettings.Gravity,
+              BulgeSettings.GravityDirection, BulgeSettings.Mass,
+              BulgeSettings.Tension, BulgeSettings.OpacityResponse,
+              BulgeSettings.ShadingStrength, BulgeSettings.LightDirection,
+              BulgeSettings.HighlightStrength,
+              FCurveSets[I].MovableArcStart,
+              FCurveSets[I].MovableArcEnd,
+              FCurveSets[I].MovableArcReversed, ErrorText);
+        else
+          Succeeded := False;
+          ErrorText := 'UNKNOWN_DEFORMATION_TYPE';
+        end;
         if not Succeeded then
         begin
           DebugLog(Format('Runtime bulge set %d failed: %s.',

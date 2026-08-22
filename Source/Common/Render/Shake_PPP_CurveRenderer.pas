@@ -20,6 +20,9 @@ type
       const Destination: TRect; Curve: TShakeCurve;
       CurveKind: TShakeCurveKind; IsActive: Boolean;
       SelectedVertex, PPI: Integer); static;
+    class procedure DrawMovableArc(Canvas: TCanvas;
+      const Destination: TRect; Curve: TShakeCurve; StartIndex, EndIndex: Integer;
+      Reversed: Boolean; PPI: Integer); static;
     class function HitTestClosingSegment(const Destination: TRect;
       Curve: TShakeCurve; X, Y, PPI: Integer): Boolean; static;
     class function HitTestSegment(const Destination: TRect;
@@ -200,6 +203,61 @@ begin
     else
       Canvas.Ellipse(VertexRect);
   end;
+  Canvas.Brush.Style := bsClear;
+end;
+
+class procedure TShakeCurveRenderer.DrawMovableArc(Canvas: TCanvas;
+  const Destination: TRect; Curve: TShakeCurve; StartIndex, EndIndex: Integer;
+  Reversed: Boolean; PPI: Integer);
+var
+  Control1: TPointF;
+  Control2: TPointF;
+  CurrentIndex: Integer;
+  Point0: TPointF;
+  Point3: TPointF;
+  Points: array[0..3] of TPoint;
+  StartPoint: TPoint;
+  EndPoint: TPoint;
+  Radius: Integer;
+  SwapIndex: Integer;
+begin
+  if (Curve = nil) or not Curve.Closed or
+    (StartIndex < 0) or (StartIndex >= Curve.Count) or
+    (EndIndex < 0) or (EndIndex >= Curve.Count) or
+    (StartIndex = EndIndex) then
+    Exit;
+  if Reversed then
+  begin
+    SwapIndex := StartIndex;
+    StartIndex := EndIndex;
+    EndIndex := SwapIndex;
+  end;
+  Canvas.Brush.Style := bsClear;
+  Canvas.Pen.Style := psSolid;
+  Canvas.Pen.Color := RGB(80, 255, 120);
+  Canvas.Pen.Width := Max(3, MulDiv(4, PPI, 96));
+  CurrentIndex := StartIndex;
+  repeat
+    ControlPoints(Curve, CurrentIndex, Point0, Control1, Control2, Point3);
+    Points[0] := ToCanvas(Destination, Point0);
+    Points[1] := ToCanvas(Destination, Control1);
+    Points[2] := ToCanvas(Destination, Control2);
+    Points[3] := ToCanvas(Destination, Point3);
+    PolyBezier(Canvas.Handle, Points[0], Length(Points));
+    CurrentIndex := (CurrentIndex + 1) mod Curve.Count;
+  until CurrentIndex = EndIndex;
+
+  StartPoint := ToCanvas(Destination, Curve[StartIndex].Position);
+  EndPoint := ToCanvas(Destination, Curve[EndIndex].Position);
+  Radius := Max(6, MulDiv(7, PPI, 96));
+  Canvas.Brush.Style := bsSolid;
+  Canvas.Brush.Color := RGB(80, 255, 120);
+  Canvas.Pen.Color := clWhite;
+  Canvas.Rectangle(StartPoint.X - Radius, StartPoint.Y - Radius,
+    StartPoint.X + Radius + 1, StartPoint.Y + Radius + 1);
+  Canvas.Brush.Color := RGB(255, 220, 70);
+  Canvas.Ellipse(EndPoint.X - Radius, EndPoint.Y - Radius,
+    EndPoint.X + Radius + 1, EndPoint.Y + Radius + 1);
   Canvas.Brush.Style := bsClear;
 end;
 

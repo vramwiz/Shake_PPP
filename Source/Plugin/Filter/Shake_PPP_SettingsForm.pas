@@ -9,7 +9,6 @@ uses
   System.Types,
   System.SysUtils,
   Vcl.Controls,
-  Vcl.ComCtrls,
   Vcl.ExtCtrls,
   Vcl.Forms,
   Vcl.Graphics,
@@ -58,8 +57,8 @@ type
     FPanMoved: Boolean;
     FPreviewBulgeAmount: Double;
     FPreviewBulgeLabel: TLabel;
-    FPreviewBulgeResetButton: TButton;
-    FPreviewBulgeTrackBar: TTrackBar;
+    FPreviewBulgeResetButton: TShakeToolbarButton;
+    FPreviewBulgeTrackBar: TShakeDarkTrackBar;
     FPreviewBulgeValueLabel: TLabel;
     FRightDownOnClosingSegment: Boolean;
     FOuterContour: TShakeCurve;
@@ -79,6 +78,9 @@ type
     FOffset: TPoint;
     FOffsetOrigin: TPoint;
     FToolbar: TShakeToolbarButtons;
+    FToolbarArcEnd: TShakeToolbarButton;
+    FToolbarArcReverse: TShakeToolbarButton;
+    FToolbarArcStart: TShakeToolbarButton;
     FToolbarCenterContour: TShakeToolbarButton;
     FToolbarCornerPoint: TShakeToolbarButton;
     FToolbarDeformedView: TShakeToolbarButton;
@@ -92,6 +94,8 @@ type
     FVertexDragging: Boolean;
     FZoomPercent: Integer;
     function ActiveCurve: TShakeCurve;
+    procedure AdjustMovableArcAfterDelete(DeletedIndex: Integer);
+    procedure AdjustMovableArcAfterInsert(InsertedIndex: Integer);
     procedure ApplyDarkTheme;
     function BackgroundDestinationRect: TRect;
     function CanvasToNormalized(X, Y: Integer; ClampToImage: Boolean;
@@ -250,21 +254,19 @@ begin
   FPreviewBulgeLabel := TLabel.Create(Self);
   FPreviewBulgeLabel.Parent := TopPanel;
   FPreviewBulgeLabel.AutoSize := False;
-  FPreviewBulgeLabel.SetBounds(MulDiv(342, CurrentPPI, 96),
+  FPreviewBulgeLabel.SetBounds(MulDiv(438, CurrentPPI, 96),
     ControlTop + MulDiv(4, CurrentPPI, 96), MulDiv(104, CurrentPPI, 96),
     MulDiv(20, CurrentPPI, 96));
   FPreviewBulgeLabel.Caption := 'プレビュー膨張量';
   FPreviewBulgeLabel.Font.Color := TopPanel.Font.Color;
 
-  FPreviewBulgeTrackBar := TTrackBar.Create(Self);
+  FPreviewBulgeTrackBar := TShakeDarkTrackBar.Create(Self);
   FPreviewBulgeTrackBar.Parent := TopPanel;
-  FPreviewBulgeTrackBar.SetBounds(MulDiv(446, CurrentPPI, 96), ControlTop,
+  FPreviewBulgeTrackBar.SetBounds(MulDiv(542, CurrentPPI, 96), ControlTop,
     MulDiv(238, CurrentPPI, 96), MulDiv(30, CurrentPPI, 96));
   FPreviewBulgeTrackBar.Min := 0;
   FPreviewBulgeTrackBar.Max := 200;
-  FPreviewBulgeTrackBar.Frequency := 10;
   FPreviewBulgeTrackBar.PageSize := 10;
-  FPreviewBulgeTrackBar.TickStyle := tsNone;
   FPreviewBulgeTrackBar.Position := 100;
   FPreviewBulgeTrackBar.OnChange := PreviewBulgeAmountChanged;
 
@@ -272,16 +274,18 @@ begin
   FPreviewBulgeValueLabel.Parent := TopPanel;
   FPreviewBulgeValueLabel.AutoSize := False;
   FPreviewBulgeValueLabel.Alignment := taRightJustify;
-  FPreviewBulgeValueLabel.SetBounds(MulDiv(686, CurrentPPI, 96),
+  FPreviewBulgeValueLabel.SetBounds(MulDiv(782, CurrentPPI, 96),
     ControlTop + MulDiv(4, CurrentPPI, 96), MulDiv(48, CurrentPPI, 96),
     MulDiv(20, CurrentPPI, 96));
   FPreviewBulgeValueLabel.Font.Color := TopPanel.Font.Color;
 
-  FPreviewBulgeResetButton := TButton.Create(Self);
+  FPreviewBulgeResetButton := TShakeToolbarButton.Create(Self);
   FPreviewBulgeResetButton.Parent := TopPanel;
-  FPreviewBulgeResetButton.SetBounds(MulDiv(742, CurrentPPI, 96), ControlTop,
+  FPreviewBulgeResetButton.SetBounds(MulDiv(838, CurrentPPI, 96), ControlTop,
     MulDiv(86, CurrentPPI, 96), MulDiv(27, CurrentPPI, 96));
   FPreviewBulgeResetButton.Caption := '100%に戻す';
+  FPreviewBulgeResetButton.Glyph := stgNone;
+  FPreviewBulgeResetButton.Kind := stbkCommand;
   FPreviewBulgeResetButton.OnClick := ResetPreviewBulgeAmount;
 
   FPreviewBulgeAmount := 1.0;
@@ -303,6 +307,46 @@ begin
   TShakeCurveRenderer.Draw(Canvas, FBackBuffer.Width, FBackBuffer.Height,
     BackgroundDestinationRect, Curve, CurveKind, IsActive,
     FSelectedVertex, CurrentPPI);
+  if IsActive and (CurveKind = sckOuterContour) and
+    HasValidMovableArc(FCurveSets[FActiveCurveSetIndex]) then
+    TShakeCurveRenderer.DrawMovableArc(Canvas, BackgroundDestinationRect,
+      Curve, FCurveSets[FActiveCurveSetIndex].MovableArcStart,
+      FCurveSets[FActiveCurveSetIndex].MovableArcEnd,
+      FCurveSets[FActiveCurveSetIndex].MovableArcReversed, CurrentPPI);
+end;
+
+procedure TFormShakeSettings.AdjustMovableArcAfterDelete(
+  DeletedIndex: Integer);
+var
+  CurveSet: ^TShakeCurveSet;
+begin
+  if FActiveCurveKind <> sckOuterContour then
+    Exit;
+  CurveSet := @FCurveSets[FActiveCurveSetIndex];
+  if (CurveSet^.MovableArcStart = DeletedIndex) or
+    (CurveSet^.MovableArcEnd = DeletedIndex) then
+  begin
+    ResetMovableArc(CurveSet^);
+    Exit;
+  end;
+  if CurveSet^.MovableArcStart > DeletedIndex then
+    Dec(CurveSet^.MovableArcStart);
+  if CurveSet^.MovableArcEnd > DeletedIndex then
+    Dec(CurveSet^.MovableArcEnd);
+end;
+
+procedure TFormShakeSettings.AdjustMovableArcAfterInsert(
+  InsertedIndex: Integer);
+var
+  CurveSet: ^TShakeCurveSet;
+begin
+  if FActiveCurveKind <> sckOuterContour then
+    Exit;
+  CurveSet := @FCurveSets[FActiveCurveSetIndex];
+  if CurveSet^.MovableArcStart >= InsertedIndex then
+    Inc(CurveSet^.MovableArcStart);
+  if CurveSet^.MovableArcEnd >= InsertedIndex then
+    Inc(CurveSet^.MovableArcEnd);
 end;
 
 procedure TFormShakeSettings.MarkDeformationDirty;
@@ -604,6 +648,9 @@ const
   TOOLBAR_FIT = 8;
   TOOLBAR_CURVE_SET_1 = 9;
   TOOLBAR_CURVE_SET_2 = 10;
+  TOOLBAR_ARC_START = 11;
+  TOOLBAR_ARC_END = 12;
+  TOOLBAR_ARC_REVERSE = 13;
   TOOLBAR_GROUP_CURVE_SET = 1;
   TOOLBAR_GROUP_EDIT_MODE = 2;
   TOOLBAR_GROUP_VERTEX_KIND = 3;
@@ -615,7 +662,7 @@ begin
   FToolbar := TShakeToolbarButtons.Create(Self);
   FToolbar.Parent := TopPanel;
   FToolbar.SetBounds(MulDiv(8, CurrentPPI, 96),
-    MulDiv(4, CurrentPPI, 96), MulDiv(322, CurrentPPI, 96), Extent);
+    MulDiv(4, CurrentPPI, 96), MulDiv(418, CurrentPPI, 96), Extent);
   FToolbar.ButtonExtent := Extent;
   FToolbar.SeparatorExtent := MulDiv(6, CurrentPPI, 96);
   FToolbar.Color := TopPanel.Color;
@@ -630,6 +677,15 @@ begin
     stgOuterContour, TOOLBAR_OUTER_CONTOUR, TOOLBAR_GROUP_EDIT_MODE);
   FToolbarCenterContour := FToolbar.AddToggle('重心・頂点範囲を編集',
     stgCenterContour, TOOLBAR_CENTER_CONTOUR, TOOLBAR_GROUP_EDIT_MODE);
+  FToolbar.AddSeparator;
+  FToolbarArcStart := FToolbar.AddCommand(
+    '選択中の外周頂点を可動範囲の開始点に設定', stgArcStart,
+    TOOLBAR_ARC_START);
+  FToolbarArcEnd := FToolbar.AddCommand(
+    '選択中の外周頂点を可動範囲の終了点に設定', stgArcEnd,
+    TOOLBAR_ARC_END);
+  FToolbarArcReverse := FToolbar.AddCommand(
+    '外周の可動範囲を反転', stgArcReverse, TOOLBAR_ARC_REVERSE);
   FToolbar.AddSeparator;
   FToolbarPan := FToolbar.AddToggle(
     '動作プレビュー（左ドラッグで画像を移動して揺らす）',
@@ -652,6 +708,12 @@ end;
 
 procedure TFormShakeSettings.UpdateToolbarSelection;
 begin
+  { Keep the arc commands visually available from the first paint.  Their
+    handlers validate the current mode, selected vertex and range, so an
+    unavailable command remains a safe no-op without looking uninitialized. }
+  FToolbarArcStart.Enabled := True;
+  FToolbarArcEnd.Enabled := True;
+  FToolbarArcReverse.Enabled := True;
   if FActiveCurveSetIndex = 0 then
   begin
     FToolbarCurveSet1.CheckState := stcsChecked;
@@ -730,6 +792,7 @@ begin
   begin
     FCurveSets[I].OuterContour := TShakeCurve.Create;
     FCurveSets[I].CenterContour := TShakeCurve.Create;
+    ResetMovableArc(FCurveSets[I]);
   end;
   FActiveCurveSetIndex := 0;
   FOuterContour := FCurveSets[0].OuterContour;
@@ -814,6 +877,7 @@ begin
   MarkDeformationDirty;
   if FShowDeformed then
     UpdateDeformedPreview;
+  UpdateToolbarSelection;
   SetEditorStatus;
   PreviewPaintBox.Invalidate;
 end;
@@ -847,11 +911,13 @@ begin
   begin
     if HitIndex >= 0 then
     begin
+      AdjustMovableArcAfterDelete(HitIndex);
       Curve.DeleteVertex(HitIndex);
       MarkDeformationDirty;
       if FShowDeformed then
         UpdateDeformedPreview;
       FSelectedVertex := -1;
+      UpdateToolbarSelection;
       SetEditorStatus;
       PreviewPaintBox.Invalidate;
       Exit;
@@ -868,13 +934,17 @@ begin
       Exit;
     SegmentIndex := HitTestSegment(X, Y);
     if SegmentIndex >= 0 then
+    begin
       HitIndex := Curve.InsertVertex(SegmentIndex + 1, Position,
-        FCurrentVertexKind)
+        FCurrentVertexKind);
+      AdjustMovableArcAfterInsert(HitIndex);
+    end
     else
       HitIndex := Curve.AddVertex(Position, FCurrentVertexKind);
     MarkDeformationDirty;
   end;
   FSelectedVertex := HitIndex;
+  UpdateToolbarSelection;
   FVertexDragging := True;
   TControlAccess(PreviewPaintBox).MouseCapture := True;
   PreviewPaintBox.Cursor := crCross;
@@ -947,6 +1017,28 @@ begin
       SwitchCurveSet(0);
     10:
       SwitchCurveSet(1);
+    11:
+      if not FPanMode and (FActiveCurveKind = sckOuterContour) and
+        (FSelectedVertex >= 0) and FOuterContour.Closed then
+      begin
+        FCurveSets[FActiveCurveSetIndex].MovableArcStart := FSelectedVertex;
+        MarkDeformationDirty;
+      end;
+    12:
+      if not FPanMode and (FActiveCurveKind = sckOuterContour) and
+        (FSelectedVertex >= 0) and FOuterContour.Closed then
+      begin
+        FCurveSets[FActiveCurveSetIndex].MovableArcEnd := FSelectedVertex;
+        MarkDeformationDirty;
+      end;
+    13:
+      if not FPanMode and
+        HasValidMovableArc(FCurveSets[FActiveCurveSetIndex]) then
+      begin
+        FCurveSets[FActiveCurveSetIndex].MovableArcReversed :=
+          not FCurveSets[FActiveCurveSetIndex].MovableArcReversed;
+        MarkDeformationDirty;
+      end;
   end;
   UpdateToolbarSelection;
   SetEditorStatus;
@@ -1040,6 +1132,7 @@ begin
       Radius := Max(7, MulDiv(10, CurrentPPI, 96));
       if DeltaX * DeltaX + DeltaY * DeltaY <= Radius * Radius then
       begin
+        AdjustMovableArcAfterDelete(Curve.Count - 1);
         Curve.DeleteVertex(Curve.Count - 1);
         Curve.Closed := True;
         MarkDeformationDirty;
@@ -1129,6 +1222,8 @@ const
   VertexNames: array[TShakeVertexKind] of string =
     ('鋭角', '滑らか');
   ClosedNames: array[Boolean] of string = ('開', '閉');
+var
+  ReverseText: string;
 begin
   if FPanMode then
     StatusLabel.Caption := Format(
@@ -1139,6 +1234,24 @@ begin
       'セット%d・%s（%s）：左クリックで%s頂点を追加（線上では中間へ挿入）／頂点を右クリック削除／空所を右ドラッグ移動　頂点数 %d',
       [FActiveCurveSetIndex + 1, CurveNames[FActiveCurveKind], ClosedNames[ActiveCurve.Closed],
        VertexNames[FCurrentVertexKind], ActiveCurve.Count]);
+  if FActiveCurveKind = sckOuterContour then
+  begin
+    if HasValidMovableArc(FCurveSets[FActiveCurveSetIndex]) then
+    begin
+      if FCurveSets[FActiveCurveSetIndex].MovableArcReversed then
+        ReverseText := '（反転）'
+      else
+        ReverseText := '';
+      StatusLabel.Caption := StatusLabel.Caption + Format(
+        '／可動範囲 %d→%d%s',
+        [FCurveSets[FActiveCurveSetIndex].MovableArcStart + 1,
+         FCurveSets[FActiveCurveSetIndex].MovableArcEnd + 1,
+         ReverseText]);
+    end
+    else
+      StatusLabel.Caption := StatusLabel.Caption +
+        '／可動範囲未指定（頂点を選択してS・Eを設定）';
+  end;
 end;
 
 procedure TFormShakeSettings.SetBackgroundRgba(const Pixels: TBytes;

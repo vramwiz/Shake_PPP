@@ -40,13 +40,21 @@ type
       GravityDirection, Mass, Tension, OpacityResponse, ShadingStrength,
       LightDirection, HighlightStrength: Double;
       out ErrorText: string): Boolean; static;
+    class function ApplyVariableOuterRgba(WeightMap: TShakeDeformationMap;
+      OuterContour, CenterContour: TShakeCurve; Source, Destination: Pointer;
+      Amount, Shape, CenterOffsetX, CenterOffsetY, Gravity,
+      GravityDirection, Mass, Tension, OpacityResponse, ShadingStrength,
+      LightDirection, HighlightStrength: Double; MovableArcStart,
+      MovableArcEnd: Integer; MovableArcReversed: Boolean;
+      out ErrorText: string): Boolean; static;
   end;
 
 implementation
 
 uses
   System.Math,
-  System.SysUtils;
+  System.SysUtils,
+  System.Types;
 
 type
   TBitmapRows = array of PByte;
@@ -57,6 +65,7 @@ type
 
 const
   DISTRIBUTION_LOOKUP_MAX = 2048;
+  VARIABLE_OUTER_MOTION_RATIO = 0.35;
 
 type
   TDistributionLookup = array[0..DISTRIBUTION_LOOKUP_MAX] of Double;
@@ -651,6 +660,375 @@ begin
         PixelOffset00 := (NativeInt(Y) * WeightMap.Width + X) * 4 + 3;
         DestinationBytes^[PixelOffset00] := EnsureRange(Round(
           DestinationBytes^[PixelOffset00] * OpacityFactor), 0, 255);
+      end;
+    end;
+  Result := True;
+end;
+
+class function TBulgeDeformer.ApplyVariableOuterRgba(
+  WeightMap: TShakeDeformationMap; OuterContour, CenterContour: TShakeCurve;
+  Source, Destination: Pointer; Amount, Shape, CenterOffsetX, CenterOffsetY,
+  Gravity, GravityDirection, Mass, Tension, OpacityResponse,
+  ShadingStrength, LightDirection, HighlightStrength: Double;
+  MovableArcStart, MovableArcEnd: Integer; MovableArcReversed: Boolean;
+  out ErrorText: string): Boolean;
+type
+  PRgbaBytes = ^TRgbaBytes;
+  TRgbaBytes = array[0..268435455] of Byte;
+var
+  AffectedBottom: Integer;
+  AffectedLeft: Integer;
+  AffectedRight: Integer;
+  AffectedTop: Integer;
+  ArcDirection: Double;
+  ArcEnabled: Boolean;
+  ArcSpan: Double;
+  ArcStartAngle: Double;
+  BaseCenterX: Double;
+  BaseCenterY: Double;
+  BaseX: Double;
+  BaseY: Double;
+  ByteCount: NativeInt;
+  CenterX: Double;
+  CenterY: Double;
+  Channel: Integer;
+  Coverage: Double;
+  DestinationBytes: PRgbaBytes;
+  DestinationOffset: NativeInt;
+  DirectionX: Double;
+  DirectionY: Double;
+  DistributionLookup: TDistributionLookup;
+  EndIndex: Integer;
+  EndPosition: TPointF;
+  FX: Double;
+  FY: Double;
+  GravityResponse: Double;
+  HalfX: Double;
+  HalfY: Double;
+  HalfZ: Double;
+  HighlightFactor: Double;
+  I: Integer;
+  LightX: Double;
+  LightY: Double;
+  LightZ: Double;
+  OpacityFactor: Double;
+  OuterHalfHeight: Double;
+  OuterHalfWidth: Double;
+  OuterScale: Double;
+  PixelOffset00: NativeInt;
+  PixelOffset01: NativeInt;
+  PixelOffset10: NativeInt;
+  PixelOffset11: NativeInt;
+  RawWeight: Double;
+  ResidualScale: Double;
+  SagX: Double;
+  SagY: Double;
+  ShadeFactor: Double;
+  SignedArea: Double;
+  SourceBytes: PRgbaBytes;
+  SourceX: Double;
+  SourceY: Double;
+  StartIndex: Integer;
+  StartPosition: TPointF;
+  TotalScale: Double;
+  TransformedBottom: Double;
+  TransformedLeft: Double;
+  TransformedRight: Double;
+  TransformedTop: Double;
+  UseShapedDistribution: Boolean;
+  Value: Double;
+  Weight: Double;
+  X: Integer;
+  X0: Integer;
+  X1: Integer;
+  Y: Integer;
+  Y0: Integer;
+  Y1: Integer;
+
+  function MapWeight(ScreenX, ScreenY: Integer): Double;
+  begin
+    if (ScreenX < 0) or (ScreenX >= WeightMap.Width) or
+      (ScreenY < 0) or (ScreenY >= WeightMap.Height) then
+      Exit(0);
+    Result := WeightMap.WeightAtScreen(ScreenX, ScreenY);
+  end;
+
+  function SampleMap(MapX, MapY: Double; CoverageOnly: Boolean): Double;
+  var
+    FractionX: Double;
+    FractionY: Double;
+    MapX0: Integer;
+    MapX1: Integer;
+    MapY0: Integer;
+    MapY1: Integer;
+    W00: Double;
+    W01: Double;
+    W10: Double;
+    W11: Double;
+  begin
+    if (MapX < 0) or (MapX > WeightMap.Width - 1) or
+      (MapY < 0) or (MapY > WeightMap.Height - 1) then
+      Exit(0);
+    MapX0 := Trunc(MapX);
+    MapY0 := Trunc(MapY);
+    MapX1 := Min(MapX0 + 1, WeightMap.Width - 1);
+    MapY1 := Min(MapY0 + 1, WeightMap.Height - 1);
+    FractionX := MapX - MapX0;
+    FractionY := MapY - MapY0;
+    W00 := MapWeight(MapX0, MapY0);
+    W01 := MapWeight(MapX1, MapY0);
+    W10 := MapWeight(MapX0, MapY1);
+    W11 := MapWeight(MapX1, MapY1);
+    if CoverageOnly then
+    begin
+      W00 := Ord(W00 > 0);
+      W01 := Ord(W01 > 0);
+      W10 := Ord(W10 > 0);
+      W11 := Ord(W11 > 0);
+    end;
+    Result := (W00 * (1 - FractionX) + W01 * FractionX) *
+      (1 - FractionY) +
+      (W10 * (1 - FractionX) + W11 * FractionX) * FractionY;
+  end;
+
+  function OuterScaleAt(ScreenX, ScreenY: Double): Double;
+  var
+    Angle: Double;
+    DistanceFromStart: Double;
+    FadeAngle: Double;
+    LengthValue: Double;
+    Mobility: Double;
+    NormalizedX: Double;
+    NormalizedY: Double;
+    T: Double;
+  begin
+    if not ArcEnabled then
+      Exit(Max(0.05, 1 + (Amount - 1) *
+        VARIABLE_OUTER_MOTION_RATIO));
+    NormalizedX := (ScreenX - CenterX) / Max(1.0, OuterHalfWidth);
+    NormalizedY := (ScreenY - CenterY) / Max(1.0, OuterHalfHeight);
+    LengthValue := Sqrt(NormalizedX * NormalizedX +
+      NormalizedY * NormalizedY);
+    if LengthValue <= 0.000001 then
+      Mobility := 1
+    else
+    begin
+      Angle := ArcTan2(NormalizedY, NormalizedX);
+      DistanceFromStart := ArcDirection * (Angle - ArcStartAngle);
+      while DistanceFromStart < 0 do
+        DistanceFromStart := DistanceFromStart + 2 * Pi;
+      while DistanceFromStart >= 2 * Pi do
+        DistanceFromStart := DistanceFromStart - 2 * Pi;
+      if DistanceFromStart > ArcSpan then
+        Mobility := 0
+      else
+      begin
+        // Use a broad C2-continuous shoulder at both endpoints.  The former
+        // 20-degree smoothstep reached full motion too quickly and could make
+        // sparse, strongly curved contours look kinked beside the endpoints.
+        FadeAngle := Min(ArcSpan * 0.5, DegToRad(45));
+        if FadeAngle <= 0.000001 then
+          Mobility := 1
+        else
+        begin
+          T := EnsureRange(Min(DistanceFromStart,
+            ArcSpan - DistanceFromStart) / FadeAngle, 0.0, 1.0);
+          Mobility := T * T * T * (T * (T * 6 - 15) + 10);
+        end;
+      end;
+    end;
+    Result := Max(0.05, 1 + (Amount - 1) *
+      VARIABLE_OUTER_MOTION_RATIO * Mobility);
+  end;
+
+begin
+  Result := False;
+  ErrorText := '';
+  if (WeightMap = nil) or (Source = nil) or (Destination = nil) or
+    (WeightMap.Width <= 0) or (WeightMap.Height <= 0) or
+    (OuterContour = nil) or (CenterContour = nil) or
+    (OuterContour.Count < 3) or (CenterContour.Count < 3) then
+  begin
+    ErrorText := 'MAP_NOT_READY';
+    Exit;
+  end;
+
+  CalculateGeometry(WeightMap.Width, WeightMap.Height, OuterContour,
+    CenterContour, BaseCenterX, BaseCenterY, OuterHalfWidth,
+    OuterHalfHeight);
+  Amount := EnsureRange(Amount, 0.0, 2.0);
+  Shape := EnsureRange(Shape, 0.0, 1.0);
+  OpacityResponse := EnsureRange(OpacityResponse, 0.0, 1.0);
+  ShadingStrength := EnsureRange(ShadingStrength, 0.0, 1.0);
+  HighlightStrength := EnsureRange(HighlightStrength, 0.0, 1.0);
+  UseShapedDistribution := not SameValue(Shape, 0.5, 0.000001);
+  if UseShapedDistribution then
+    BuildDistributionLookup(Shape, DistributionLookup);
+  CenterOffsetX := EnsureRange(CenterOffsetX, -1.0, 1.0);
+  CenterOffsetY := EnsureRange(CenterOffsetY, -1.0, 1.0);
+  CenterX := EnsureRange(BaseCenterX + CenterOffsetX * OuterHalfWidth,
+    0.0, WeightMap.Width - 1.0);
+  CenterY := EnsureRange(BaseCenterY + CenterOffsetY * OuterHalfHeight,
+    0.0, WeightMap.Height - 1.0);
+  CalculateGravityParameters(Gravity, GravityDirection, Mass, Tension,
+    GravityResponse, DirectionX, DirectionY);
+  ArcEnabled := OuterContour.Closed and (MovableArcStart >= 0) and
+    (MovableArcStart < OuterContour.Count) and (MovableArcEnd >= 0) and
+    (MovableArcEnd < OuterContour.Count) and
+    (MovableArcStart <> MovableArcEnd);
+  if ArcEnabled then
+  begin
+    StartIndex := MovableArcStart;
+    EndIndex := MovableArcEnd;
+    if MovableArcReversed then
+    begin
+      I := StartIndex;
+      StartIndex := EndIndex;
+      EndIndex := I;
+    end;
+    SignedArea := 0;
+    for I := 0 to OuterContour.Count - 1 do
+      SignedArea := SignedArea +
+        OuterContour[I].Position.X *
+          OuterContour[(I + 1) mod OuterContour.Count].Position.Y -
+        OuterContour[(I + 1) mod OuterContour.Count].Position.X *
+          OuterContour[I].Position.Y;
+    if SignedArea >= 0 then
+      ArcDirection := 1
+    else
+      ArcDirection := -1;
+    StartPosition := OuterContour[StartIndex].Position;
+    EndPosition := OuterContour[EndIndex].Position;
+    ArcStartAngle := ArcTan2(
+      (StartPosition.Y * Max(1, WeightMap.Height - 1) - CenterY) /
+        Max(1.0, OuterHalfHeight),
+      (StartPosition.X * Max(1, WeightMap.Width - 1) - CenterX) /
+        Max(1.0, OuterHalfWidth));
+    ArcSpan := ArcDirection * (ArcTan2(
+      (EndPosition.Y * Max(1, WeightMap.Height - 1) - CenterY) /
+        Max(1.0, OuterHalfHeight),
+      (EndPosition.X * Max(1, WeightMap.Width - 1) - CenterX) /
+        Max(1.0, OuterHalfWidth)) - ArcStartAngle);
+    while ArcSpan < 0 do
+      ArcSpan := ArcSpan + 2 * Pi;
+    while ArcSpan >= 2 * Pi do
+      ArcSpan := ArcSpan - 2 * Pi;
+    ArcEnabled := ArcSpan > 0.000001;
+  end;
+  CalculateLightParameters(LightDirection, LightX, LightY, LightZ,
+    HalfX, HalfY, HalfZ);
+
+  SourceBytes := Source;
+  DestinationBytes := Destination;
+  ByteCount := NativeInt(WeightMap.Width) * WeightMap.Height * 4;
+  Move(SourceBytes^, DestinationBytes^, ByteCount);
+  if (WeightMap.ActiveRight < WeightMap.ActiveLeft) or
+    (WeightMap.ActiveBottom < WeightMap.ActiveTop) then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  // Move the contour by part of the requested radial scale, then apply the
+  // remaining scale through the original center-weight distribution.  This
+  // preserves the maximum center deformation while allowing the mask itself
+  // to grow or contract.
+  OuterScale := Max(0.05, 1 + (Amount - 1) *
+    VARIABLE_OUTER_MOTION_RATIO);
+  TransformedLeft := CenterX +
+    (WeightMap.ActiveLeft - CenterX) * OuterScale;
+  TransformedTop := CenterY +
+    (WeightMap.ActiveTop - CenterY) * OuterScale;
+  TransformedRight := CenterX +
+    (WeightMap.ActiveRight - CenterX) * OuterScale;
+  TransformedBottom := CenterY +
+    (WeightMap.ActiveBottom - CenterY) * OuterScale;
+  AffectedLeft := EnsureRange(Floor(Min(WeightMap.ActiveLeft,
+    TransformedLeft)), 0, WeightMap.Width - 1);
+  AffectedTop := EnsureRange(Floor(Min(WeightMap.ActiveTop,
+    TransformedTop)), 0, WeightMap.Height - 1);
+  AffectedRight := EnsureRange(Ceil(Max(WeightMap.ActiveRight,
+    TransformedRight)), 0, WeightMap.Width - 1);
+  AffectedBottom := EnsureRange(Ceil(Max(WeightMap.ActiveBottom,
+    TransformedBottom)), 0, WeightMap.Height - 1);
+
+  for Y := AffectedTop to AffectedBottom do
+    for X := AffectedLeft to AffectedRight do
+    begin
+      OuterScale := OuterScaleAt(X, Y);
+      BaseX := CenterX + (X - CenterX) / OuterScale;
+      BaseY := CenterY + (Y - CenterY) / OuterScale;
+      RawWeight := SampleMap(BaseX, BaseY, False);
+      // Keep contour coverage independent from deformation weight.  Outline
+      // pixels sit where the weight approaches zero and must still move as
+      // fully covered image pixels instead of fading with the weight.
+      Coverage := Max(SampleMap(X, Y, True),
+        SampleMap(BaseX, BaseY, True));
+      if Coverage <= 0 then
+        Continue;
+      Weight := RawWeight;
+      if UseShapedDistribution then
+        Weight := DistributionWeight(DistributionLookup, Weight);
+      ApplyGravityToSample(Round(BaseX), Round(BaseY), CenterX, CenterY,
+        OuterHalfWidth, OuterHalfHeight, Amount, GravityResponse,
+        DirectionX, DirectionY, Weight, SagX, SagY);
+      ResidualScale := Max(0.05,
+        1 + (Amount / OuterScale - 1) * Weight);
+      TotalScale := OuterScale * ResidualScale;
+      SourceX := EnsureRange(CenterX +
+        (BaseX - CenterX - SagX / OuterScale) / ResidualScale,
+        0.0, WeightMap.Width - 1.0);
+      SourceY := EnsureRange(CenterY +
+        (BaseY - CenterY - SagY / OuterScale) / ResidualScale,
+        0.0, WeightMap.Height - 1.0);
+      X0 := Trunc(SourceX);
+      Y0 := Trunc(SourceY);
+      X1 := Min(X0 + 1, WeightMap.Width - 1);
+      Y1 := Min(Y0 + 1, WeightMap.Height - 1);
+      FX := SourceX - X0;
+      FY := SourceY - Y0;
+      PixelOffset00 := (NativeInt(Y0) * WeightMap.Width + X0) * 4;
+      PixelOffset01 := (NativeInt(Y0) * WeightMap.Width + X1) * 4;
+      PixelOffset10 := (NativeInt(Y1) * WeightMap.Width + X0) * 4;
+      PixelOffset11 := (NativeInt(Y1) * WeightMap.Width + X1) * 4;
+      DestinationOffset := (NativeInt(Y) * WeightMap.Width + X) * 4;
+      for Channel := 0 to 3 do
+      begin
+        Value := (SourceBytes^[PixelOffset00 + Channel] * (1 - FX) +
+          SourceBytes^[PixelOffset01 + Channel] * FX) * (1 - FY) +
+          (SourceBytes^[PixelOffset10 + Channel] * (1 - FX) +
+          SourceBytes^[PixelOffset11 + Channel] * FX) * FY;
+        Value := SourceBytes^[DestinationOffset + Channel] *
+          (1 - Coverage) + Value * Coverage;
+        DestinationBytes^[DestinationOffset + Channel] :=
+          EnsureRange(Round(Value), 0, 255);
+      end;
+      if (ShadingStrength > 0) or (HighlightStrength > 0) then
+      begin
+        LightingAt(WeightMap, EnsureRange(Round(BaseX), 0,
+          WeightMap.Width - 1), EnsureRange(Round(BaseY), 0,
+          WeightMap.Height - 1), DistributionLookup,
+          UseShapedDistribution, CenterX, CenterY, OuterHalfWidth,
+          OuterHalfHeight, Amount, GravityResponse, DirectionX,
+          DirectionY, Weight, ShadingStrength, HighlightStrength,
+          LightX, LightY, LightZ, HalfX, HalfY, HalfZ, ShadeFactor,
+          HighlightFactor);
+        for Channel := 0 to 2 do
+        begin
+          Value := EnsureRange(DestinationBytes^[DestinationOffset + Channel] *
+            ShadeFactor, 0.0, 255.0);
+          Value := Value + (255 - Value) * HighlightFactor;
+          DestinationBytes^[DestinationOffset + Channel] :=
+            EnsureRange(Round(Value), 0, 255);
+        end;
+      end;
+      if OpacityResponse > 0 then
+      begin
+        OpacityFactor := 1 + OpacityResponse *
+          (1 / (TotalScale * TotalScale) - 1);
+        DestinationBytes^[DestinationOffset + 3] := EnsureRange(Round(
+          DestinationBytes^[DestinationOffset + 3] * OpacityFactor),
+          0, 255);
       end;
     end;
   Result := True;

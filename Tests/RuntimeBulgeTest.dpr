@@ -108,6 +108,7 @@ var
   ShadingRightPixels: TBytes;
   StrongGravityResponsePixels: TBytes;
   ShakeSettings: TShakeRuntimeSettings;
+  VariableOuterPixels: TBytes;
   Video: TFILTER_PROC_VIDEO;
 begin
   FillInput;
@@ -122,6 +123,10 @@ begin
     AddEllipse(CurveSets[0].CenterContour, 0.30, 0.5, 0.08, 0.12);
     AddEllipse(CurveSets[1].OuterContour, 0.70, 0.5, 0.20, 0.30);
     AddEllipse(CurveSets[1].CenterContour, 0.70, 0.5, 0.08, 0.12);
+    CurveSets[0].MovableArcStart := 0;
+    CurveSets[0].MovableArcEnd := 6;
+    CurveSets[1].MovableArcStart := 0;
+    CurveSets[1].MovableArcEnd := 6;
     Require(TryEncodeCurveSets(CurveSets, CurveDataText, ErrorText),
       ErrorText);
 
@@ -169,6 +174,29 @@ begin
         PixelChannel(OutputPixels, 98, 48, 0),
         'Curve set 2 did not apply its runtime bulge.');
       BulgeOnlyPixels := Copy(OutputPixels);
+
+      InputPixels := Copy(OriginalPixels);
+      ShakeSettings.DeformationType := sdtVariableOuter;
+      ApplyRuntimeDeformation(@Video, CurveDataText, ShakeSettings,
+        BulgeSettings);
+      VariableOuterPixels := Copy(OutputPixels);
+      Require(PixelChannel(VariableOuterPixels, 38, 78, 1) <>
+        PixelChannel(BulgeOnlyPixels, 38, 78, 1),
+        'Variable outer bulge did not expand beyond the fixed contour.');
+
+      InputPixels := Copy(OriginalPixels);
+      BulgeSettings.Gravity := 0.25;
+      BulgeSettings.GravityDirection := 0.0;
+      ApplyRuntimeDeformation(@Video, CurveDataText, ShakeSettings,
+        BulgeSettings);
+      Require(PixelChannel(OutputPixels, 38, 16, 1) =
+        PixelChannel(OriginalPixels, 38, 16, 1),
+        'Top-fixed variable bulge unexpectedly expanded the upper contour.');
+      Require(PixelChannel(OutputPixels, 38, 78, 1) <>
+        PixelChannel(OriginalPixels, 38, 78, 1),
+        'Top-fixed variable bulge did not expand the lower contour.');
+      BulgeSettings.Gravity := 0.0;
+      ShakeSettings.DeformationType := sdtFixedOuter;
 
       InputPixels := Copy(OriginalPixels);
       BulgeSettings.OpacityResponse := 1.0;
