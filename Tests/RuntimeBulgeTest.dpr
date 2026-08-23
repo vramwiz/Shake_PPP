@@ -150,6 +150,10 @@ begin
     BulgeSettings.Shape := 0.5;
     BulgeSettings.Mass := 0.5;
     BulgeSettings.Tension := 0.5;
+    Require(SameValue(BulgeCenterXForCurveSet(0.25, 0), 0.25),
+      'Curve set 1 unexpectedly reversed bulge center X.');
+    Require(SameValue(BulgeCenterXForCurveSet(0.25, 1), -0.25),
+      'Curve set 2 did not reverse bulge center X.');
 
     InitializeRuntimeDeformer;
     try

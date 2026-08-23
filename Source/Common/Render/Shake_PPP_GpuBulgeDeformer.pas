@@ -605,8 +605,9 @@ begin
       CalculateGeometry(FWidth, FHeight, CurveSets[I].OuterContour,
         CurveSets[I].CenterContour, BaseCenterX, BaseCenterY,
         OuterHalfWidth, OuterHalfHeight);
-      Constants.CenterX := EnsureRange(BaseCenterX + Settings.CenterX *
-        OuterHalfWidth, 0.0, FWidth - 1.0);
+      Constants.CenterX := EnsureRange(BaseCenterX +
+        BulgeCenterXForCurveSet(Settings.CenterX, I) * OuterHalfWidth,
+        0.0, FWidth - 1.0);
       Constants.CenterY := EnsureRange(BaseCenterY + Settings.CenterY *
         OuterHalfHeight, 0.0, FHeight - 1.0);
       if VariableOuter then

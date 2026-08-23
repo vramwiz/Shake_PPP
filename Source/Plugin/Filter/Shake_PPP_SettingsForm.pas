@@ -77,10 +77,10 @@ type
     FPreviewRendering: Boolean;
     FOffset: TPoint;
     FOffsetOrigin: TPoint;
+    FFloatingArcToolbar: TShakeToolbarButtons;
+    FFloatingCornerPoint: TShakeToolbarButton;
+    FFloatingSmoothPoint: TShakeToolbarButton;
     FToolbar: TShakeToolbarButtons;
-    FToolbarArcEnd: TShakeToolbarButton;
-    FToolbarArcReverse: TShakeToolbarButton;
-    FToolbarArcStart: TShakeToolbarButton;
     FToolbarCenterContour: TShakeToolbarButton;
     FToolbarCornerPoint: TShakeToolbarButton;
     FToolbarDeformedView: TShakeToolbarButton;
@@ -102,6 +102,7 @@ type
       out Position: TPointF): Boolean;
     procedure BeginPan(X, Y: Integer);
     procedure CreateBulgePreviewControls;
+    procedure CreateFloatingArcToolbar;
     procedure CreateShapeToolbar;
     procedure DrawCurve(Canvas: TCanvas; Curve: TShakeCurve;
       CurveKind: TShakeCurveKind; IsActive: Boolean);
@@ -118,6 +119,7 @@ type
     procedure MotionTimerTick(Sender: TObject);
     procedure ResetMotionPreview;
     procedure SwitchCurveSet(Index: Integer);
+    procedure UpdateFloatingArcToolbar;
     procedure UpdatePreviewBulgeAmountLabel;
     procedure UpdateToolbarSelection;
     function UpdateDeformedPreview: Boolean;
@@ -148,6 +150,11 @@ uses
 
 type
   TControlAccess = class(TControl);
+
+const
+  TOOLBAR_ARC_START = 11;
+  TOOLBAR_ARC_END = 12;
+  TOOLBAR_ARC_REVERSE = 13;
 
 procedure TFormShakeSettings.ApplyDarkTheme;
 const
@@ -579,6 +586,7 @@ end;
 
 function TFormShakeSettings.UpdateDeformedPreview: Boolean;
 var
+  CenterOffsetX: Double;
   ErrorText: string;
 begin
   if not FDeformedDirty then
@@ -588,9 +596,11 @@ begin
     (FBulgeDeformationMap.Height <> FBackground.Height) then
     Result := FBulgeDeformationMap.Build(FBackground.Width,
       FBackground.Height, FOuterContour, FCenterContour, ErrorText);
+  CenterOffsetX := BulgeCenterXForCurveSet(FBulgeSettings.CenterX,
+    FActiveCurveSetIndex);
   if Result then
     Result := FBulgeDeformationMap.Apply(FBackground, FDeformedBackground,
-      FPreviewBulgeAmount, FBulgeSettings.Shape, FBulgeSettings.CenterX,
+      FPreviewBulgeAmount, FBulgeSettings.Shape, CenterOffsetX,
       FBulgeSettings.CenterY, FBulgeSettings.Gravity,
       FBulgeSettings.GravityDirection, FBulgeSettings.Mass,
       FBulgeSettings.Tension, FBulgeSettings.OpacityResponse,
@@ -601,7 +611,7 @@ begin
     FDeformedDirty := False;
     DebugLog(Format(
       'Bulge preview updated: amount=%.3f shape=%.3f centerOffset=(%.3f,%.3f) gravity=%.3f direction=%.1f mass=%.3f tension=%.3f opacity=%.3f shading=%.3f light=%.1f highlight=%.3f.',
-      [FPreviewBulgeAmount, FBulgeSettings.Shape, FBulgeSettings.CenterX,
+      [FPreviewBulgeAmount, FBulgeSettings.Shape, CenterOffsetX,
        FBulgeSettings.CenterY, FBulgeSettings.Gravity,
        FBulgeSettings.GravityDirection, FBulgeSettings.Mass,
        FBulgeSettings.Tension, FBulgeSettings.OpacityResponse,
@@ -648,9 +658,6 @@ const
   TOOLBAR_FIT = 8;
   TOOLBAR_CURVE_SET_1 = 9;
   TOOLBAR_CURVE_SET_2 = 10;
-  TOOLBAR_ARC_START = 11;
-  TOOLBAR_ARC_END = 12;
-  TOOLBAR_ARC_REVERSE = 13;
   TOOLBAR_GROUP_CURVE_SET = 1;
   TOOLBAR_GROUP_EDIT_MODE = 2;
   TOOLBAR_GROUP_VERTEX_KIND = 3;
@@ -662,7 +669,7 @@ begin
   FToolbar := TShakeToolbarButtons.Create(Self);
   FToolbar.Parent := TopPanel;
   FToolbar.SetBounds(MulDiv(8, CurrentPPI, 96),
-    MulDiv(4, CurrentPPI, 96), MulDiv(418, CurrentPPI, 96), Extent);
+    MulDiv(4, CurrentPPI, 96), MulDiv(304, CurrentPPI, 96), Extent);
   FToolbar.ButtonExtent := Extent;
   FToolbar.SeparatorExtent := MulDiv(6, CurrentPPI, 96);
   FToolbar.Color := TopPanel.Color;
@@ -677,15 +684,6 @@ begin
     stgOuterContour, TOOLBAR_OUTER_CONTOUR, TOOLBAR_GROUP_EDIT_MODE);
   FToolbarCenterContour := FToolbar.AddToggle('重心・頂点範囲を編集',
     stgCenterContour, TOOLBAR_CENTER_CONTOUR, TOOLBAR_GROUP_EDIT_MODE);
-  FToolbar.AddSeparator;
-  FToolbarArcStart := FToolbar.AddCommand(
-    '選択中の外周頂点を可動範囲の開始点に設定', stgArcStart,
-    TOOLBAR_ARC_START);
-  FToolbarArcEnd := FToolbar.AddCommand(
-    '選択中の外周頂点を可動範囲の終了点に設定', stgArcEnd,
-    TOOLBAR_ARC_END);
-  FToolbarArcReverse := FToolbar.AddCommand(
-    '外周の可動範囲を反転', stgArcReverse, TOOLBAR_ARC_REVERSE);
   FToolbar.AddSeparator;
   FToolbarPan := FToolbar.AddToggle(
     '動作プレビュー（左ドラッグで画像を移動して揺らす）',
@@ -706,14 +704,40 @@ begin
   UpdateToolbarSelection;
 end;
 
+procedure TFormShakeSettings.CreateFloatingArcToolbar;
+const
+  FLOATING_GROUP_VERTEX_KIND = 1;
+var
+  Extent: Integer;
+begin
+  Extent := MulDiv(36, CurrentPPI, 96);
+  FFloatingArcToolbar := TShakeToolbarButtons.Create(Self);
+  FFloatingArcToolbar.Parent := Self;
+  FFloatingArcToolbar.SetBounds(0, 0, Extent * 5, Extent);
+  FFloatingArcToolbar.ButtonExtent := Extent;
+  FFloatingArcToolbar.Color := TColor($00303030);
+  FFloatingArcToolbar.ParentBackground := False;
+  FFloatingArcToolbar.OnButtonExecute := ToolbarButtonExecute;
+  FFloatingArcToolbar.AddCommand(
+    'この頂点を可動範囲の開始点に設定', stgArcStart,
+    TOOLBAR_ARC_START);
+  FFloatingArcToolbar.AddCommand(
+    'この頂点を可動範囲の終了点に設定', stgArcEnd,
+    TOOLBAR_ARC_END);
+  FFloatingArcToolbar.AddCommand(
+    '外周の可動範囲を反転', stgArcReverse, TOOLBAR_ARC_REVERSE);
+  FFloatingSmoothPoint := FFloatingArcToolbar.AddToggle(
+    '選択中の頂点を滑らかなベジェ接続に変更', stgSmoothPoint, 5,
+    FLOATING_GROUP_VERTEX_KIND);
+  FFloatingCornerPoint := FFloatingArcToolbar.AddToggle(
+    '選択中の頂点を鋭角に変更', stgCornerPoint, 4,
+    FLOATING_GROUP_VERTEX_KIND);
+  FFloatingArcToolbar.Visible := False;
+  UpdateToolbarSelection;
+end;
+
 procedure TFormShakeSettings.UpdateToolbarSelection;
 begin
-  { Keep the arc commands visually available from the first paint.  Their
-    handlers validate the current mode, selected vertex and range, so an
-    unavailable command remains a safe no-op without looking uninitialized. }
-  FToolbarArcStart.Enabled := True;
-  FToolbarArcEnd.Enabled := True;
-  FToolbarArcReverse.Enabled := True;
   if FActiveCurveSetIndex = 0 then
   begin
     FToolbarCurveSet1.CheckState := stcsChecked;
@@ -748,11 +772,19 @@ begin
   begin
     FToolbarCornerPoint.CheckState := stcsChecked;
     FToolbarSmoothPoint.CheckState := stcsUnchecked;
+    if Assigned(FFloatingCornerPoint) then
+      FFloatingCornerPoint.CheckState := stcsChecked;
+    if Assigned(FFloatingSmoothPoint) then
+      FFloatingSmoothPoint.CheckState := stcsUnchecked;
   end
   else
   begin
     FToolbarCornerPoint.CheckState := stcsUnchecked;
     FToolbarSmoothPoint.CheckState := stcsChecked;
+    if Assigned(FFloatingCornerPoint) then
+      FFloatingCornerPoint.CheckState := stcsUnchecked;
+    if Assigned(FFloatingSmoothPoint) then
+      FFloatingSmoothPoint.CheckState := stcsChecked;
   end;
 
   if FShowDeformed then
@@ -772,6 +804,57 @@ begin
   FFitToWindow := True;
   FOffset := Point(0, 0);
   PreviewPaintBox.Invalidate;
+end;
+
+procedure TFormShakeSettings.UpdateFloatingArcToolbar;
+var
+  Anchor: TPoint;
+  Gap: Integer;
+  LeftPosition: Integer;
+  MaxLeft: Integer;
+  MaxTop: Integer;
+  PreviewOrigin: TPoint;
+  TopPosition: Integer;
+begin
+  if not Assigned(FFloatingArcToolbar) then
+    Exit;
+  if FPanMode or FDragging or FVertexDragging or
+    (FActiveCurveKind <> sckOuterContour) or not FOuterContour.Closed or
+    (FSelectedVertex < 0) or (FSelectedVertex >= FOuterContour.Count) then
+  begin
+    FFloatingArcToolbar.Visible := False;
+    Exit;
+  end;
+
+  Anchor := NormalizedToCanvas(FOuterContour[FSelectedVertex].Position);
+  if not PtInRect(PreviewPaintBox.ClientRect, Anchor) then
+  begin
+    FFloatingArcToolbar.Visible := False;
+    Exit;
+  end;
+
+  Gap := MulDiv(10, CurrentPPI, 96);
+  MaxLeft := Max(0,
+    PreviewPaintBox.ClientWidth - FFloatingArcToolbar.Width);
+  MaxTop := Max(0,
+    PreviewPaintBox.ClientHeight - FFloatingArcToolbar.Height);
+
+  LeftPosition := Anchor.X + Gap;
+  if LeftPosition + FFloatingArcToolbar.Width > PreviewPaintBox.ClientWidth then
+    LeftPosition := Anchor.X - Gap - FFloatingArcToolbar.Width;
+  TopPosition := Anchor.Y - Gap - FFloatingArcToolbar.Height;
+  if TopPosition < 0 then
+    TopPosition := Anchor.Y + Gap;
+  LeftPosition := EnsureRange(LeftPosition, 0, MaxLeft);
+  TopPosition := EnsureRange(TopPosition, 0, MaxTop);
+
+  PreviewOrigin := ScreenToClient(
+    PreviewPaintBox.ClientToScreen(Point(0, 0)));
+  FFloatingArcToolbar.SetBounds(PreviewOrigin.X + LeftPosition,
+    PreviewOrigin.Y + TopPosition, FFloatingArcToolbar.Width,
+    FFloatingArcToolbar.Height);
+  FFloatingArcToolbar.Visible := True;
+  FFloatingArcToolbar.BringToFront;
 end;
 
 procedure TFormShakeSettings.FormCreate(Sender: TObject);
@@ -810,6 +893,7 @@ begin
   FSelectedVertex := -1;
   FZoomPercent := 100;
   CreateShapeToolbar;
+  CreateFloatingArcToolbar;
   CreateBulgePreviewControls;
   SetEditorStatus;
   DebugLog('Settings form created.');
@@ -890,6 +974,8 @@ var
   Position: TPointF;
   SegmentIndex: Integer;
 begin
+  if Assigned(FFloatingArcToolbar) then
+    FFloatingArcToolbar.Visible := False;
   FRightDownOnClosingSegment := False;
   if FPanMode and (Button = mbLeft) then
   begin
@@ -1017,21 +1103,21 @@ begin
       SwitchCurveSet(0);
     10:
       SwitchCurveSet(1);
-    11:
+    TOOLBAR_ARC_START:
       if not FPanMode and (FActiveCurveKind = sckOuterContour) and
         (FSelectedVertex >= 0) and FOuterContour.Closed then
       begin
         FCurveSets[FActiveCurveSetIndex].MovableArcStart := FSelectedVertex;
         MarkDeformationDirty;
       end;
-    12:
+    TOOLBAR_ARC_END:
       if not FPanMode and (FActiveCurveKind = sckOuterContour) and
         (FSelectedVertex >= 0) and FOuterContour.Closed then
       begin
         FCurveSets[FActiveCurveSetIndex].MovableArcEnd := FSelectedVertex;
         MarkDeformationDirty;
       end;
-    13:
+    TOOLBAR_ARC_REVERSE:
       if not FPanMode and
         HasValidMovableArc(FCurveSets[FActiveCurveSetIndex]) then
       begin
@@ -1044,6 +1130,7 @@ begin
   SetEditorStatus;
   if FShowDeformed and not FPanMode then
     UpdateDeformedPreview;
+  UpdateFloatingArcToolbar;
   PreviewPaintBox.Invalidate;
 end;
 
@@ -1166,6 +1253,7 @@ begin
     UpdateDeformedPreview;
     PreviewPaintBox.Invalidate;
   end;
+  UpdateFloatingArcToolbar;
 end;
 
 procedure TFormShakeSettings.PreviewPaintBoxPaint(Sender: TObject);
@@ -1180,6 +1268,8 @@ begin
   BufferCanvas.FillRect(Rect(0, 0, FBackBuffer.Width, FBackBuffer.Height));
   if (FBackground.Width <= 0) or (FBackground.Height <= 0) then
   begin
+    if Assigned(FFloatingArcToolbar) then
+      FFloatingArcToolbar.Visible := False;
     if not FPaintLogged then
     begin
       FPaintLogged := True;
@@ -1213,6 +1303,7 @@ begin
     DrawCurve(BufferCanvas, FCenterContour, sckCenterContour, True);
   end;
   PreviewPaintBox.Canvas.Draw(0, 0, FBackBuffer);
+  UpdateFloatingArcToolbar;
 end;
 
 procedure TFormShakeSettings.SetEditorStatus;

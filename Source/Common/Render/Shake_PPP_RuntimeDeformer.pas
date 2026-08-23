@@ -338,6 +338,7 @@ procedure TShakeObjectState.ApplyDeformation(
   BulgeEnabled, ShakeEnabled: Boolean);
 var
   ByteCount: NativeInt;
+  CenterOffsetX: Double;
   CurrentSource: Pointer;
   ErrorText: string;
   I: Integer;
@@ -437,6 +438,7 @@ begin
       if FMapReady[I] then
       begin
         NextDestination := NextBuffer;
+        CenterOffsetX := BulgeCenterXForCurveSet(BulgeSettings.CenterX, I);
 {$IFDEF DEBUG}
         PerfStageStarted := DebugTimerStart;
 {$ENDIF}
@@ -445,7 +447,7 @@ begin
             Succeeded := TBulgeDeformer.ApplyRgba(FMaps[I],
               FCurveSets[I].OuterContour, FCurveSets[I].CenterContour,
               CurrentSource, NextDestination, BulgeSettings.Amount,
-              BulgeSettings.Shape, BulgeSettings.CenterX,
+              BulgeSettings.Shape, CenterOffsetX,
               BulgeSettings.CenterY, BulgeSettings.Gravity,
               BulgeSettings.GravityDirection, BulgeSettings.Mass,
               BulgeSettings.Tension, BulgeSettings.OpacityResponse,
@@ -455,7 +457,7 @@ begin
             Succeeded := TBulgeDeformer.ApplyVariableOuterRgba(FMaps[I],
               FCurveSets[I].OuterContour, FCurveSets[I].CenterContour,
               CurrentSource, NextDestination, BulgeSettings.Amount,
-              BulgeSettings.Shape, BulgeSettings.CenterX,
+              BulgeSettings.Shape, CenterOffsetX,
               BulgeSettings.CenterY, BulgeSettings.Gravity,
               BulgeSettings.GravityDirection, BulgeSettings.Mass,
               BulgeSettings.Tension, BulgeSettings.OpacityResponse,

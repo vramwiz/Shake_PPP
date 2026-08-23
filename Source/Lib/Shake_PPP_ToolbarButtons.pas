@@ -244,6 +244,11 @@ var
   ColorValue: Cardinal;
   DarkBackground: Boolean;
   H: Integer;
+  GlyphColor: TColor;
+  GlyphText: string;
+  LineLeft: Integer;
+  LineRight: Integer;
+  LineY: Integer;
   MidX: Integer;
   MidY: Integer;
   P: array[0..3] of TPoint;
@@ -354,23 +359,47 @@ begin
       end;
     stgCornerPoint:
       begin
-        Canvas.Polyline([Point(MidX - 10, MidY + 7),
-          Point(MidX, MidY - 7), Point(MidX + 10, MidY + 7)]);
-        Canvas.Brush.Color := TextColor;
-        Canvas.Rectangle(MidX - 3, MidY - 10, MidX + 4, MidY - 3);
+        GlyphColor := RGB(255, 80, 80);
+        if not Enabled then
+          GlyphColor := BlendColor(BackColor, GlyphColor, 100);
+        Canvas.Pen.Color := GlyphColor;
+        Canvas.Pen.Width := 1;
+        LineLeft := Max(3, H div 12);
+        LineRight := ClientWidth - LineLeft - 1;
+        Canvas.Polyline([Point(LineLeft, MidY + Max(7, H div 4)),
+          Point(MidX, MidY - Max(8, H div 4)),
+          Point(LineRight, MidY + Max(7, H div 4))]);
+        Canvas.Brush.Style := bsSolid;
+        Canvas.Brush.Color := GlyphColor;
+        Canvas.Rectangle(MidX - 4, MidY - Max(8, H div 4) - 4,
+          MidX + 5, MidY - Max(8, H div 4) + 5);
+        Canvas.Brush.Style := bsClear;
       end;
     stgSmoothPoint:
       begin
-        P[0] := Point(MidX - 11, MidY + 6);
-        P[1] := Point(MidX - 5, MidY - 8);
-        P[2] := Point(MidX + 5, MidY - 8);
-        P[3] := Point(MidX + 11, MidY + 6);
-        PolyBezier(Canvas.Handle, P[0], 4);
+        GlyphColor := RGB(70, 155, 255);
+        if not Enabled then
+          GlyphColor := BlendColor(BackColor, GlyphColor, 100);
+        Canvas.Pen.Color := GlyphColor;
         Canvas.Pen.Width := 1;
-        Canvas.MoveTo(MidX - 8, MidY - 5);
-        Canvas.LineTo(MidX + 8, MidY - 5);
-        Canvas.Brush.Color := TextColor;
-        Canvas.Ellipse(MidX - 3, MidY - 8, MidX + 4, MidY - 1);
+        LineLeft := Max(3, H div 12);
+        LineRight := ClientWidth - LineLeft - 1;
+        P[0] := Point(LineLeft, MidY + Max(6, H div 5));
+        P[1] := Point(MidX - Max(6, H div 5),
+          MidY - Max(8, H div 4));
+        P[2] := Point(MidX + Max(6, H div 5),
+          MidY - Max(8, H div 4));
+        P[3] := Point(LineRight, MidY + Max(6, H div 5));
+        PolyBezier(Canvas.Handle, P[0], 4);
+        Canvas.MoveTo(LineLeft + Max(3, H div 10),
+          MidY - Max(6, H div 5));
+        Canvas.LineTo(LineRight - Max(3, H div 10),
+          MidY - Max(6, H div 5));
+        Canvas.Brush.Style := bsSolid;
+        Canvas.Brush.Color := GlyphColor;
+        Canvas.Ellipse(MidX - 4, MidY - Max(6, H div 5) - 4,
+          MidX + 5, MidY - Max(6, H div 5) + 5);
+        Canvas.Brush.Style := bsClear;
       end;
     stgOriginalView:
       begin
@@ -408,19 +437,69 @@ begin
     stgArcEnd,
     stgArcReverse:
       begin
-        Canvas.Arc(MidX - 10, MidY - 9, MidX + 11, MidY + 10,
-          MidX - 8, MidY + 6, MidX + 8, MidY + 6);
-        Canvas.Font.Color := TextColor;
-        Canvas.Font.Style := [fsBold];
         if FGlyph = stgArcStart then
-          Canvas.TextOut(MidX - Canvas.TextWidth('S') div 2,
-            MidY - Canvas.TextHeight('S') div 2, 'S')
+        begin
+          GlyphColor := RGB(75, 235, 125);
+          GlyphText := 'S';
+        end
         else if FGlyph = stgArcEnd then
-          Canvas.TextOut(MidX - Canvas.TextWidth('E') div 2,
-            MidY - Canvas.TextHeight('E') div 2, 'E')
+        begin
+          GlyphColor := RGB(255, 185, 65);
+          GlyphText := 'E';
+        end
         else
-          Canvas.TextOut(MidX - Canvas.TextWidth('R') div 2,
-            MidY - Canvas.TextHeight('R') div 2, 'R');
+        begin
+          GlyphColor := RGB(200, 125, 255);
+          GlyphText := 'R';
+        end;
+        if not Enabled then
+          GlyphColor := BlendColor(BackColor, GlyphColor, 100);
+
+        LineLeft := Max(4, H div 7);
+        LineRight := ClientWidth - LineLeft - 1;
+        LineY := ClientHeight - Max(5, H div 7);
+        Canvas.Pen.Color := GlyphColor;
+        Canvas.Pen.Width := 1;
+        Canvas.Font.Color := GlyphColor;
+        Canvas.Font.Style := [fsBold];
+        Canvas.Font.Height := -Max(16, H * 5 div 9);
+        Canvas.TextOut(MidX - Canvas.TextWidth(GlyphText) div 2,
+          Max(0, LineY - Canvas.TextHeight(GlyphText) - Max(3, H div 12)),
+          GlyphText);
+
+        if FGlyph = stgArcReverse then
+        begin
+          LineLeft := Max(4, H div 9);
+          LineRight := ClientWidth - LineLeft - 1;
+          Canvas.MoveTo(LineLeft, LineY - 5);
+          Canvas.LineTo(LineRight, LineY - 5);
+          Canvas.MoveTo(LineRight, LineY + 1);
+          Canvas.LineTo(LineLeft, LineY + 1);
+
+          Canvas.Pen.Width := Max(2, H div 18);
+          Canvas.MoveTo(LineRight, LineY - 5);
+          Canvas.LineTo(LineRight - Max(5, H div 7), LineY - 8);
+          Canvas.MoveTo(LineRight, LineY - 5);
+          Canvas.LineTo(LineRight - Max(5, H div 7), LineY - 2);
+          Canvas.MoveTo(LineLeft, LineY + 1);
+          Canvas.LineTo(LineLeft + Max(5, H div 7), LineY - 2);
+          Canvas.MoveTo(LineLeft, LineY + 1);
+          Canvas.LineTo(LineLeft + Max(5, H div 7), LineY + 4);
+        end
+        else
+        begin
+          Canvas.MoveTo(LineLeft, LineY);
+          Canvas.LineTo(LineRight, LineY);
+          Canvas.Brush.Style := bsSolid;
+          Canvas.Brush.Color := GlyphColor;
+          if FGlyph = stgArcStart then
+            Canvas.Rectangle(LineLeft - 2, LineY - 3,
+              LineLeft + 3, LineY + 3)
+          else
+            Canvas.Ellipse(LineRight - 3, LineY - 3,
+              LineRight + 3, LineY + 3);
+          Canvas.Brush.Style := bsClear;
+        end;
         Canvas.Font.Style := [];
       end;
   end;

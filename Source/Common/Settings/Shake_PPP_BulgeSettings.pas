@@ -43,6 +43,8 @@ var
 
 procedure AddBulgeFilterItems;
 function CurrentBulgeRuntimeSettings: TBulgeRuntimeSettings;
+function BulgeCenterXForCurveSet(CenterX: Double;
+  CurveSetIndex: Integer): Double;
 
 implementation
 
@@ -94,6 +96,15 @@ begin
     180.0);
   Result.HighlightStrength := EnsureRange(BulgeHighlightStrengthItem.Value,
     0.0, 100.0) / 100.0;
+end;
+
+function BulgeCenterXForCurveSet(CenterX: Double;
+  CurveSetIndex: Integer): Double;
+begin
+  if CurveSetIndex = 1 then
+    Result := -CenterX
+  else
+    Result := CenterX;
 end;
 
 end.
