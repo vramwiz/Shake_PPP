@@ -1,4 +1,4 @@
-unit Shake_PPP_LastFrameCapture;
+﻿unit Shake_PPP_LastFrameCapture;
 
 // Keeps the most recent composited AviUtl2 framebuffer for the settings preview.
 
@@ -361,6 +361,8 @@ end;
 function CopyLastFrame(out Pixels: TBytes; out Width, Height: Integer;
   out Status: string): Boolean;
 var
+  RawPixels: TBytes;
+  SnapshotFormat: DXGI_FORMAT;
   Destination: PByte;
   I: NativeInt;
   PixelCount: NativeInt;
@@ -396,90 +398,94 @@ begin
     end;
     Width := CaptureWidth;
     Height := CaptureHeight;
-    PixelCount := NativeInt(Width) * Height;
-    SetLength(Pixels, PixelCount * 4);
-    Source := CaptureBuffer;
-    Destination := @Pixels[0];
-    case CaptureFormat of
-      DXGI_FORMAT_R8G8B8A8_UNORM,
-      DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
-        Move(Source^, Destination^, Length(Pixels));
-      DXGI_FORMAT_B8G8R8A8_UNORM,
-      DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
-        for I := 0 to PixelCount - 1 do
-        begin
-          Destination[0] := Source[2];
-          Destination[1] := Source[1];
-          Destination[2] := Source[0];
-          Destination[3] := Source[3];
-          Inc(Source, 4);
-          Inc(Destination, 4);
-        end;
-      DXGI_FORMAT_R16G16B16A16_UNORM:
-        begin
-          SourceWords := PPixelWords(Source);
-          for I := 0 to PixelCount - 1 do
-          begin
-            Destination[0] := SourceWords[0] div 257;
-            Destination[1] := SourceWords[1] div 257;
-            Destination[2] := SourceWords[2] div 257;
-            Destination[3] := SourceWords[3] div 257;
-            Inc(SourceWords);
-            Inc(Destination, 4);
-          end;
-        end;
-      DXGI_FORMAT_R16G16B16A16_FLOAT:
-        begin
-          SourceWords := PPixelWords(Source);
-          for I := 0 to PixelCount - 1 do
-          begin
-            Destination[0] := FloatToByte(HalfToSingle(SourceWords[0]));
-            Destination[1] := FloatToByte(HalfToSingle(SourceWords[1]));
-            Destination[2] := FloatToByte(HalfToSingle(SourceWords[2]));
-            Destination[3] := Round(EnsureRange(
-              HalfToSingle(SourceWords[3]), 0.0, 1.0) * 255);
-            Inc(SourceWords);
-            Inc(Destination, 4);
-          end;
-        end;
-    else
-      Pixels := nil;
-      Result := False;
-    end;
-{$IFDEF DEBUG}
-    if Result then
-    begin
-      ColorMinimum := 255;
-      ColorMaximum := 0;
-      AlphaMinimum := 255;
-      AlphaMaximum := 0;
-      NonBlackCount := 0;
-      SampleCount := 0;
-      SampleStep := Max(1, PixelCount div 4096);
-      SampleIndex := 0;
-      while SampleIndex < PixelCount do
-      begin
-        Source := @Pixels[SampleIndex * 4];
-        ColorMinimum := Min(ColorMinimum,
-          Min(Source[0], Min(Source[1], Source[2])));
-        ColorMaximum := Max(ColorMaximum,
-          Max(Source[0], Max(Source[1], Source[2])));
-        AlphaMinimum := Min(AlphaMinimum, Source[3]);
-        AlphaMaximum := Max(AlphaMaximum, Source[3]);
-        if (Source[0] <> 0) or (Source[1] <> 0) or (Source[2] <> 0) then
-          Inc(NonBlackCount);
-        Inc(SampleCount);
-        Inc(SampleIndex, SampleStep);
-      end;
-      DebugLog(Format(
-        'CopyLastFrame RGBA: size=%dx%d samples=%d nonBlack=%d color=%d..%d alpha=%d..%d.',
-        [Width, Height, SampleCount, NonBlackCount, ColorMinimum,
-         ColorMaximum, AlphaMinimum, AlphaMaximum]));
-    end;
-{$ENDIF}
+    SetLength(RawPixels, CaptureBufferSize);
+    Move(CaptureBuffer^, RawPixels[0], CaptureBufferSize);
+    SnapshotFormat := CaptureFormat;
   finally
     LeaveCriticalSection(CaptureLock);
   end;
+  // Convert an owned snapshot so the next video frame can be captured concurrently.
+  PixelCount := NativeInt(Width) * Height;
+  SetLength(Pixels, PixelCount * 4);
+  Source := @RawPixels[0];
+  Destination := @Pixels[0];
+  case SnapshotFormat of
+    DXGI_FORMAT_R8G8B8A8_UNORM,
+    DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+      Move(Source^, Destination^, Length(Pixels));
+    DXGI_FORMAT_B8G8R8A8_UNORM,
+    DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+      for I := 0 to PixelCount - 1 do
+      begin
+        Destination[0] := Source[2];
+        Destination[1] := Source[1];
+        Destination[2] := Source[0];
+        Destination[3] := Source[3];
+        Inc(Source, 4);
+        Inc(Destination, 4);
+      end;
+    DXGI_FORMAT_R16G16B16A16_UNORM:
+      begin
+        SourceWords := PPixelWords(Source);
+        for I := 0 to PixelCount - 1 do
+        begin
+          Destination[0] := SourceWords[0] div 257;
+          Destination[1] := SourceWords[1] div 257;
+          Destination[2] := SourceWords[2] div 257;
+          Destination[3] := SourceWords[3] div 257;
+          Inc(SourceWords);
+          Inc(Destination, 4);
+        end;
+      end;
+    DXGI_FORMAT_R16G16B16A16_FLOAT:
+      begin
+        SourceWords := PPixelWords(Source);
+        for I := 0 to PixelCount - 1 do
+        begin
+          Destination[0] := FloatToByte(HalfToSingle(SourceWords[0]));
+          Destination[1] := FloatToByte(HalfToSingle(SourceWords[1]));
+          Destination[2] := FloatToByte(HalfToSingle(SourceWords[2]));
+          Destination[3] := Round(EnsureRange(
+            HalfToSingle(SourceWords[3]), 0.0, 1.0) * 255);
+          Inc(SourceWords);
+          Inc(Destination, 4);
+        end;
+      end;
+  else
+    Pixels := nil;
+    Result := False;
+  end;
+{$IFDEF DEBUG}
+  if Result then
+  begin
+    ColorMinimum := 255;
+    ColorMaximum := 0;
+    AlphaMinimum := 255;
+    AlphaMaximum := 0;
+    NonBlackCount := 0;
+    SampleCount := 0;
+    SampleStep := Max(1, PixelCount div 4096);
+    SampleIndex := 0;
+    while SampleIndex < PixelCount do
+    begin
+      Source := @Pixels[SampleIndex * 4];
+      ColorMinimum := Min(ColorMinimum,
+        Min(Source[0], Min(Source[1], Source[2])));
+      ColorMaximum := Max(ColorMaximum,
+        Max(Source[0], Max(Source[1], Source[2])));
+      AlphaMinimum := Min(AlphaMinimum, Source[3]);
+      AlphaMaximum := Max(AlphaMaximum, Source[3]);
+      if (Source[0] <> 0) or (Source[1] <> 0) or (Source[2] <> 0) then
+        Inc(NonBlackCount);
+      Inc(SampleCount);
+      Inc(SampleIndex, SampleStep);
+    end;
+    DebugLog(Format(
+      'CopyLastFrame RGBA: size=%dx%d samples=%d nonBlack=%d color=%d..%d alpha=%d..%d.',
+      [Width, Height, SampleCount, NonBlackCount, ColorMinimum,
+       ColorMaximum, AlphaMinimum, AlphaMaximum]));
+  end;
+{$ENDIF}
 end;
 
 end.
